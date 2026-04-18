@@ -18,7 +18,8 @@ defmodule TradingLabWeb.Router do
     pipe_through :browser
 
     # get "/", PageController, :home
-    live "/", ChartLive, :home
+    #live "/", ChartLive, :home
+    live "/", HudLive, :index
   end
 
   # Other scopes may use custom stacks.
