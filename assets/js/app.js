@@ -24,12 +24,66 @@ import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/trading_lab"
 import topbar from "../vendor/topbar"
+import { createChart } from 'lightweight-charts'
+
+// 1. Define your custom Hooks object
+let Hooks = {};
+
+Hooks.ChartHook = {
+  mounted() {
+    // 1. Initialize the chart with modern options
+    const chart = createChart(this.el, {
+      layout: { 
+        background: { color: '#131722' }, 
+        textColor: '#d1d4dc' 
+      },
+      grid: { 
+        vertLines: { color: '#242a3e' }, 
+        horzLines: { color: '#242a3e' } 
+      },
+      width: this.el.clientWidth,
+      height: 500,
+    });
+
+    // 2. Use the modern addSeries method
+    const candlestickSeries = chart.addCandlestickSeries();
+
+    const volumeSeries = chart.addHistogramSeries({
+      color: '#26a69a',
+      priceFormat: { type: 'volume' },
+      priceScaleId: '', // Set to empty to show as an overlay
+    });
+
+    // Position it at the bottom 25% of the chart
+    volumeSeries.priceScale().applyOptions({
+      scaleMargins: { top: 0.8, bottom: 0 },
+    });
+
+    // 3. Listen for events
+    this.handleEvent("new_tick", (data) => {
+      console.log("Odin tick received:", data); // Helpful for debugging!
+      candlestickSeries.update(data);
+
+      // Update the volume bars
+      // We color it green if price went up, red if it went down
+      const volumeColor = data.close >= data.open ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)';
+      volumeSeries.update({
+        time: data.time,
+        value: data.value,
+        color: volumeColor
+      });
+    });
+
+    // Keep a reference so we can resize if the window changes
+    this.chart = chart;
+  }
+};
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks},
+  hooks: {...colocatedHooks, ...Hooks},
 })
 
 // Show progress bar on live navigation and form submits
