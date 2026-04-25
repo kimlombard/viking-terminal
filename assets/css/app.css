@@ -103,3 +103,36 @@
 [data-phx-session], [data-phx-teleported-src] { display: contents }
 
 /* This file is for your main application CSS */
+
+/* Custom Trading HUD Palette */
+:root {
+  --neon-bull: #00FFFF;  /* Electric Cyan */
+  --neon-bear: #FF00FF;  /* Cyber Magenta */
+  --hvn-gold: #FFFF00;   /* High Volume Node Yellow */
+  --bg-pitch: #050505;   /* Deep Space Black */
+}
+
+.trading-container {
+  background-color: var(--bg-pitch);
+  cursor: crosshair;
+}
+
+/* The Glow Effect for Strong Confluence */
+.bull-glow {
+  filter: drop-shadow(0 0 5px var(--neon-bull));
+}
+
+.bear-glow {
+  filter: drop-shadow(0 0 5px var(--neon-bear));
+}
+
+/* Animations for "HyperBull" or "HyperBear" States */
+@keyframes pulse-fast {
+  0% { opacity: 0.8; }
+  50% { opacity: 1; stroke-width: 3; }
+  100% { opacity: 0.8; }
+}
+
+.hyper-state {
+  animation: pulse-fast 0.5s infinite;
+}

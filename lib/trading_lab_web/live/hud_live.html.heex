@@ -1,0 +1,8 @@
+<div class="relative w-full h-screen bg-[#050505] flex flex-col">
+  <div class="absolute top-4 right-16 z-10 flex flex-col font-mono text-xs pointer-events-none drop-shadow-md">
+    <span class="text-white">LOT SIZE: <%= @lot_size %></span>
+    <span class="text-[#FFFF00]">PROB: <%= @target_prob %>%</span>
+  </div>
+
+  <div id="viking-chart" phx-hook="ChartHook" phx-update="ignore" class="w-full h-full"></div>
+</div>

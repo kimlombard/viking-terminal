@@ -14,6 +14,8 @@ defmodule TradingLab.Application do
       # Start a worker by calling: TradingLab.Worker.start_link(arg)
       # {TradingLab.Worker, arg},
       # Start to serve requests, typically the last entry
+      # ADD THIS LINE SO THE ENGINE ACTUALLY BOOTS:
+      TradingLab.EnginePort,
       TradingLabWeb.Endpoint
     ]
 

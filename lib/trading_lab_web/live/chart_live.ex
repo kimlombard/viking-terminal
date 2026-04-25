@@ -78,3 +78,22 @@ defmodule TradingLabWeb.ChartLive do
     end
   end
 end
+
+defmodule VikingWeb.EngineConsumer do
+  @doc "Parses the candle:time,open,high,low,close,vol,indicator,status format"
+  def parse_line(line) do
+    ["candle" | data] = String.split(line, ":")
+    [t, o, h, l, c, v, ind, stat] = String.split(List.first(data), ",")
+
+    %{
+      time: t,
+      open: String.to_float(o),
+      high: String.to_float(h),
+      low: String.to_float(l),
+      close: String.to_float(c),
+      volume: String.to_float(v),
+      indicator: String.to_float(ind),
+      status: stat
+    }
+  end
+end

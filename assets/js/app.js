@@ -3,6 +3,8 @@ import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/trading_lab"
 import topbar from "../vendor/topbar"
+
+// 1. One clean import
 import { createChart } from 'lightweight-charts'
 
 // 1. Define the Viking Terminal Hook

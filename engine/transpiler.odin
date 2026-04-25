@@ -176,7 +176,7 @@ print_ast :: proc(node: ^AST_Node, indent: string = "") {
 	}
 }
 
-main :: proc() {
+test_transpiler :: proc() {
 	// Our new test script: Creating a variable!
 	script := "my_custom_sma = ta.sma(close + open / 2, 10)"
 	fmt.println("1. User Pastes PineScript:", script)

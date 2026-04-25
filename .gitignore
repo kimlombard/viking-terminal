@@ -1,6 +1,5 @@
 # Build artifacts
-engine
-/engine
+/engine/engine
 *.bin
 viking
 

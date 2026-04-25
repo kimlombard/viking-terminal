@@ -2,11 +2,11 @@ package main
 
 import "core:fmt"
 import "core:time"
+import "core:os"            // Needed for the buffer flush
+import "core:c"             // Needed for c.int
 import "core:math/rand"
 import lua "vendor:lua/5.4" // The magic bridge!
 
-// Configuration
-MAX_DRAWDOWN  :: 0.05 
 
 Candle :: struct {
 	time:      i64,
@@ -58,6 +58,11 @@ main :: proc() {
 	price := 100.0
 	initial_balance := 2000.0 
 
+    // --- NEW VARIABLES ---
+    MAX_DRAWDOWN : f64 = 0.05
+    asset_id     : cstring = "NAS100"
+    tick_index   : c.int = 0
+
     // --- 3. THE LIVE MARKET LOOP ---
 	for {
 		c: Candle
@@ -101,8 +106,28 @@ main :: proc() {
 		status := "OK"
 		if drawdown > MAX_DRAWDOWN do status = "VIOLATION"
 
-        // Output to Phoenix (Notice we send c.indicator now)
-        fmt.printf("candle:%v,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%s\n", 
-            c.time, c.open, c.high, c.low, c.close, c.volume, c.indicator, status)
+        // 1. Increment our tick and call the matrix engine
+        tick_index += 1
+        kinetic := calculate_kinetic_candle(asset_id, tick_index)
+
+        // 2. DYNAMIC STATE HACK: Override the state_code based on the candle's move
+        // If it closed higher than it opened, it's bullish. If it moved a LOT, it's HyperBull.
+        price_diff := c.close - c.open
+        if price_diff > 0.5 {
+            kinetic.state_code = 2  // HyperBull
+        } else if price_diff > 0 {
+            kinetic.state_code = 1  // BuildBull
+        } else if price_diff > -0.5 {
+            kinetic.state_code = -1 // BuildBear
+        } else {
+            kinetic.state_code = -2 // HyperBear
+        }
+
+        // 3. Output to Phoenix
+        fmt.printf("candle:%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%s,%d\n", 
+            c.time, c.open, c.high, c.low, c.close, c.volume, c.indicator, "OK", kinetic.state_code)
+        
+        // 4. Force the OS to send the data immediately!
+        os.flush(os.stdout)
 	}
 }

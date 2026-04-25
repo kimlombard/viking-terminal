@@ -3,7 +3,7 @@ package main
 import "core:fmt"
 import lua "vendor:lua/5.4" // The Lua C API bindings for Odin
 
-main :: proc() {
+test_sandbox :: proc() {
 	fmt.println("--- Booting Viking Lua VM ---")
 
 	// 1. Initialize the Virtual Machine
