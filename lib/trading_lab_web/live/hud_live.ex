@@ -8,10 +8,14 @@ defmodule TradingLabWeb.HudLive do
       Logger.info("HudLive: Connected and subscribed to market_data.")
     end
 
+    # 1. Grab the first user to ensure the ID is valid
+    user = List.first(TradingLab.Accounts.list_users())
+
     # Fetch the history from the DB!
     historical_signals = TradingLab.Trading.list_recent_signals()
 
     socket = assign(socket,
+      user: user, # Store user in state
       lot_size: 1.0,
       prob: 50.0,
       status: "OK",
@@ -47,7 +51,7 @@ defmodule TradingLabWeb.HudLive do
       # Note: Since you are the only user in the lab right now, we can safely
       # assign this to user_id: 1 (the account you just registered).
       {:ok, db_signal} = TradingLab.Trading.create_signal(%{
-        user_id: 1,
+        user_id: socket.assigns.user.id,
         type: data.signal,
         price: data.close,
         time: data.time,

@@ -76,6 +76,15 @@ Hooks.TradingTerminal = {
     this.subChart2 = createChart(sub2El, { ...chartOptions, height: 150, timeScale: { ...chartOptions.timeScale, visible: false } });
     this.hmmSeries = this.subChart2.addHistogramSeries({ color: '#eab308' });
 
+    // Inside Hooks.TradingTerminal.mounted()
+    this.emaSeries = this.mainChart.addLineSeries({ 
+      color: '#f1f5f9', 
+      lineWidth: 1, 
+      lineStyle: 2, // Dashed line for visual distinction
+      lastValueVisible: false,
+      priceLineVisible: false
+    });
+
     // 4. Unified Synchronization
     const syncGroup = [
       { chart: this.mainChart, series: this.mainSeries },
@@ -106,6 +115,11 @@ Hooks.TradingTerminal = {
     // 5. Handle Incoming Data
     this.handleEvent("new_tick", (payload) => {
       if (!this.mainSeries) return;
+
+      // Inside this.handleEvent("new_tick")
+      if (payload.ema) {
+        this.emaSeries.update({ time: payload.time, value: payload.ema });
+      }
 
       // 1. Initialize a markers array outside the event if it doesn't exist
       this.markers = this.markers || [];
