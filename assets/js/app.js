@@ -7,6 +7,47 @@ import topbar from "../vendor/topbar"
 // 1. One clean import
 import { createChart } from 'lightweight-charts'
 
+// --- VIKING AUDIO ENGINE ---
+// We initialize this lazily because browsers block audio until a user clicks the page.
+let audioCtx;
+
+function playVikingChime(type) {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  
+  // Browsers suspend audio context if it wasn't started by a user gesture.
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
+
+  const oscillator = audioCtx.createOscillator();
+  const gainNode = audioCtx.createGain();
+
+  oscillator.connect(gainNode);
+  gainNode.connect(audioCtx.destination);
+
+  const now = audioCtx.currentTime;
+
+  if (type === "BUY") {
+    // A clean, high-pitched double-chime for Longs
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(880, now); // A5 note
+  } else {
+    // A lower, deeper tone for Shorts
+    oscillator.type = 'triangle';
+    oscillator.frequency.setValueAtTime(330, now); // E4 note
+  }
+
+  // The "Ping" Envelope: Fast attack, exponential fade out
+  gainNode.gain.setValueAtTime(0, now);
+  gainNode.gain.linearRampToValueAtTime(0.3, now + 0.02); // Quick volume spike
+  gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.8); // Fade out over 0.8 seconds
+
+  oscillator.start(now);
+  oscillator.stop(now + 1);
+}
+
 // 1. Define the Viking Terminal Hook
 let Hooks = {};
 
@@ -87,6 +128,9 @@ Hooks.TradingTerminal = {
 
           // 3. Tell the price series to render the updated markers
           this.mainSeries.setMarkers(this.markers);
+
+          // --- RING THE BELL ---
+          playVikingChime(payload.signal);
       }
 
       const colors = {

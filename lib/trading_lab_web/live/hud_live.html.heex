@@ -12,17 +12,41 @@
     </div>
   </header>
 
-  <!-- The hook requires an ID, but we make it highly specific -->
-  <main 
-    id="viking-terminal-engine-instance-1" 
-    phx-hook="TradingTerminal" 
-    phx-update="ignore"
-    class="flex-grow flex flex-col p-2 gap-2"
+  <!-- Flex Row Container to hold Charts (Left) and Log (Right) -->
+  <div class="flex-grow flex p-2 gap-2 overflow-hidden">
+    
+    <!-- THE CHARTS (We just wrapped your existing main tag) -->
+    <main 
+      id="viking-terminal-engine-instance-1" 
+      phx-hook="TradingTerminal" 
+      phx-update="ignore"
+      class="flex-[4] flex flex-col gap-2 min-w-0"
     >
+      <div data-target="main-chart" class="flex-[3] bg-black/20 rounded-lg border border-gray-800"></div>
+      <div data-target="sub-pane-1" class="flex-1 bg-black/20 rounded-lg border border-gray-800"></div>
+      <div data-target="sub-pane-2" class="flex-1 bg-black/20 rounded-lg border border-gray-800"></div>
+    </main>
 
-    <!-- Replaced all IDs with data-target attributes -->
-    <div data-target="main-chart" class="flex-[3] bg-black/20 rounded-lg border border-gray-800"></div>
-    <div data-target="sub-pane-1" class="flex-1 bg-black/20 rounded-lg border border-gray-800"></div>
-    <div data-target="sub-pane-2" class="flex-1 bg-black/20 rounded-lg border border-gray-800"></div>
-  </main>
-</div>
+    <!-- THE SIGNAL LOG SIDEBAR -->
+    <aside class="flex-1 bg-black/20 rounded-lg border border-gray-800 flex flex-col min-w-[250px]">
+      <div class="p-2 border-b border-gray-800 text-xs font-bold text-gray-400 tracking-widest">
+        VIKING SIGNAL LOG
+      </div>
+      
+      <!-- The scrolling list -->
+      <div class="flex-1 overflow-y-auto p-2 space-y-2 text-xs font-mono">
+        <%= for sig <- @signals do %>
+          <div class={"flex justify-between p-2 rounded border " <> if(sig.type == "BUY", do: "text-green-400 border-green-900 bg-green-400/10", else: "text-red-400 border-red-900 bg-red-400/10")}>
+            <span class="font-bold"><%= sig.type %></span>
+            <span>@ <%= :erlang.float_to_binary(sig.price, decimals: 2) %></span>
+          </div>
+        <% end %>
+        
+        <%= if Enum.empty?(@signals) do %>
+          <div class="text-gray-600 italic text-center mt-4">Waiting for Edge alignment...</div>
+        <% end %>
+      </div>
+    </aside>
+
+  </div>
+</div> <!-- Closing the main app wrapper -->

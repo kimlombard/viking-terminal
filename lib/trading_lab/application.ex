@@ -9,6 +9,7 @@ defmodule TradingLab.Application do
   def start(_type, _args) do
     children = [
       TradingLabWeb.Telemetry,
+      TradingLab.Repo,
       {DNSCluster, query: Application.get_env(:trading_lab, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: TradingLab.PubSub},
       # Start a worker by calling: TradingLab.Worker.start_link(arg)
