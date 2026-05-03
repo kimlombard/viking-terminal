@@ -1,8 +1,23 @@
-<div class="relative w-full h-screen bg-[#050505] flex flex-col">
-  <div class="absolute top-4 right-16 z-10 flex flex-col font-mono text-xs pointer-events-none drop-shadow-md">
-    <span class="text-white">LOT SIZE: <%= @lot_size %></span>
-    <span class="text-[#FFFF00]">PROB: <%= @target_prob %>%</span>
-  </div>
+<div id="terminal-wrapper" class="flex flex-col h-screen bg-[#131722] text-gray-300">
+  <!-- Top Header with your Lot Size/Prob text -->
+  <header class="p-2 border-b border-gray-800 flex justify-between items-center text-xs font-mono">
+    <div>VIKING_TERMINAL_V1</div>
+    <div class="flex gap-4">
+      <span class="text-yellow-400">LOT SIZE: 0.0</span>
+      <span class="text-yellow-400">PROB: 0.0%</span>
+    </div>
+  </header>
 
-  <div id="viking-chart" phx-hook="ChartHook" phx-update="ignore" class="w-full h-full"></div>
+  <!-- The Charting Engine Hook -->
+  <main 
+    id="terminal-container" 
+    phx-hook="TradingTerminal" 
+    class="flex-grow flex flex-col p-2 gap-2"
+  >
+    <!-- Main Price Chart -->
+    <div id="main-chart" class="flex-[2] bg-black/20 rounded-lg border border-gray-800" phx-update="ignore"></div>
+    
+    <!-- Adaptive BSP / HMM Sub-Pane -->
+    <div id="sub-pane-1" class="flex-1 bg-black/20 rounded-lg border border-gray-800" phx-update="ignore"></div>
+  </main>
 </div>

@@ -1,28 +1,27 @@
 defmodule TradingLabWeb.HudLive do
   use TradingLabWeb, :live_view
-
-  @layout {TradingLabWeb.Layouts, :terminal}
+  require Logger
 
   def mount(_params, _session, socket) do
-    if connected?(socket), do: Phoenix.PubSub.subscribe(TradingLab.PubSub, "viking:ticks")
+    if connected?(socket) do
+      # Subscribe to the SAME topic used in EnginePort
+      Phoenix.PubSub.subscribe(TradingLab.PubSub, "market_data")
+      Logger.info("HudLive: Connected and subscribed to market_data.")
+    end
 
-    {:ok, assign(socket, candles: [], lot_size: 0.0, target_prob: 0.0)}
+    # Explicitly set the layout to your terminal layout
+    {:ok, socket, layout: {TradingLabWeb.Layouts, :terminal}}
   end
 
-  # Change 1: Add the %{} map syntax to explicitly match the data structure
-  def handle_info({:new_candle, %{} = data}, socket) do
-    # Trap 1: This will print the raw map to your terminal
-    IO.inspect(data, label: "LIVEVIEW CAUGHT CANDLE")
+  # This is the "Safety Valve" that prevents the crash!
+  def handle_info({:new_tick, data}, socket) do
+    # Push the data to the JavaScript 'TradingTerminal' hook[cite: 1, 2]
+    {:noreply, push_event(socket, "new_tick", data)}
+  end
 
-    lot_size = Map.get(data, :lot_size, 0.0)
-    target_prob = Map.get(data, :target_prob, 0.0)
-
-    # Instead of storing candles in an Elixir array, we push the event
-    # directly to the "new_candle" listener in our Javascript ChartHook!
-    {:noreply,
-      socket
-      |> assign(lot_size: lot_size, target_prob: target_prob)
-      |> push_event("new_candle", data)
-    }
+  # Catch any other stray messages to prevent crashes
+  def handle_info(msg, socket) do
+    Logger.debug("HudLive received unknown message: #{inspect(msg)}")
+    {:noreply, socket}
   end
 end
