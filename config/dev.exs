@@ -80,3 +80,12 @@ config :phoenix_live_view,
 
 # Disable swoosh api client as it is only required for production adapters.
 config :swoosh, :api_client, false
+
+config :trading_lab, TradingLab.Repo,
+  username: "kim",
+  password: "postgres",
+  hostname: "localhost",
+  database: "trading_lab_dev",
+  stacktrace: true,
+  show_sensitive_data_on_connection_error: true,
+  pool_size: 10

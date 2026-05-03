@@ -7,7 +7,21 @@
 # General application configuration
 import Config
 
+config :trading_lab, :scopes,
+  user: [
+    default: true,
+    module: TradingLab.Accounts.Scope,
+    assign_key: :current_scope,
+    access_path: [:user, :id],
+    schema_key: :user_id,
+    schema_type: :id,
+    schema_table: :users,
+    test_data_fixture: TradingLab.AccountsFixtures,
+    test_setup_helper: :register_and_log_in_user
+  ]
+
 config :trading_lab,
+  ecto_repos: [TradingLab.Repo], # Add this line
   generators: [timestamp_type: :utc_datetime]
 
 # Configure the endpoint
