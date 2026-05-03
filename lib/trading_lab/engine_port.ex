@@ -42,9 +42,9 @@ defmodule TradingLab.EnginePort do
   # --- Private Helpers ---
 
   defp parse_csv(line) do
-    # Odin Output: time, open, high, low, close, volume, indicator, status, state_code
+    # Odin Output: time, open, high, low, close, volume, indicator, status, state_code, lot, prob
     case String.split(line, ",") do
-      [t, o, h, l, c, v, ind, _stat, sc] ->
+      [t, o, h, l, c, v, ind, stat, sc, lot, prob] ->
         {:ok, %{
           time: String.to_integer(t),
           open: to_f(o),
@@ -52,8 +52,11 @@ defmodule TradingLab.EnginePort do
           low: to_f(l),
           close: to_f(c),
           volume: to_f(v),
-          bsp: to_f(ind),     # Map 'indicator' to 'bsp' for the JS hook
-          state: String.to_integer(String.trim(sc)) # The Kinetic Matrix state code[cite: 2]
+          bsp: to_f(ind),
+          status: stat,
+          state: String.to_integer(String.trim(sc)),
+          lot_size: to_f(lot),
+          probability: to_f(prob)
         }}
       _ ->
         :error

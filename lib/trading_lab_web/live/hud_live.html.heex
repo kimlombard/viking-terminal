@@ -1,23 +1,27 @@
-<div id="terminal-wrapper" class="flex flex-col h-screen bg-[#131722] text-gray-300">
-  <!-- Top Header with your Lot Size/Prob text -->
+<!-- Remove ID from the wrapper completely -->
+<div class="flex flex-col h-screen bg-[#131722] text-gray-300">
   <header class="p-2 border-b border-gray-800 flex justify-between items-center text-xs font-mono">
     <div>VIKING_TERMINAL_V1</div>
     <div class="flex gap-4">
-      <span class="text-yellow-400">LOT SIZE: 0.0</span>
-      <span class="text-yellow-400">PROB: 0.0%</span>
+      <span class={if @status == "VIOLATION", do: "text-red-500 font-bold", else: "text-yellow-400"}>
+        LOT SIZE: <%= @lot_size %>
+      </span>
+      <span class="text-yellow-400">
+        PROB: <%= :erlang.float_to_binary(@prob, decimals: 1) %>%
+      </span>
     </div>
   </header>
 
-  <!-- The Charting Engine Hook -->
+  <!-- The hook requires an ID, but we make it highly specific -->
   <main 
-    id="terminal-container" 
+    id="viking-terminal-engine" 
     phx-hook="TradingTerminal" 
+    phx-update="ignore"
     class="flex-grow flex flex-col p-2 gap-2"
   >
-    <!-- Main Price Chart -->
-    <div id="main-chart" class="flex-[2] bg-black/20 rounded-lg border border-gray-800" phx-update="ignore"></div>
-    
-    <!-- Adaptive BSP / HMM Sub-Pane -->
-    <div id="sub-pane-1" class="flex-1 bg-black/20 rounded-lg border border-gray-800" phx-update="ignore"></div>
+    <!-- Replaced all IDs with data-target attributes -->
+    <div data-target="main-chart" class="flex-[3] bg-black/20 rounded-lg border border-gray-800"></div>
+    <div data-target="sub-pane-1" class="flex-1 bg-black/20 rounded-lg border border-gray-800"></div>
+    <div data-target="sub-pane-2" class="flex-1 bg-black/20 rounded-lg border border-gray-800"></div>
   </main>
 </div>
