@@ -98,6 +98,9 @@ main :: proc() {
     initial_balance := 26820.0
     state := EngineState{ is_seeded = false }
 
+    // Initialize the volume profile map (Price -> Volume)
+    volume_profile := make(map[f64]f64)
+
     // --- 4. THE HISTORICAL PROCESSING LOOP ---
     for i := 3; i < len(lines); i += 1 {
         line := lines[i]
@@ -117,6 +120,27 @@ main :: proc() {
         c.open, _  = strconv.parse_f64(columns[4])
         c.volume, _ = strconv.parse_f64(columns[5])
 
+        // The "Resolution" of your profile. 
+        // Use 1.0 for NAS100 (whole numbers), or maybe 0.5 for XAUUSD.
+        tick_size: f64 = 1.0 
+
+        // Round price to the nearest bucket
+        // We use c.close and c.volume because that's where strconv.parse_f64 put them!
+        bucket: f64 = math.round(c.close / tick_size) * tick_size
+
+        // Add the volume to that specific price bucket
+        volume_profile[bucket] += c.volume
+
+        max_volume: f64 = 0.0
+        poc_price: f64 = c.close // Default to current price
+
+        for price, vol in volume_profile {
+            if vol > max_volume {
+                max_volume = vol
+                poc_price = price
+            }
+        }
+
         // --- THE LUA HANDOFF ---
         lua.getglobal(L, "on_tick") 
         lua.pushnumber(L, lua.Number(c.open)) 
@@ -135,7 +159,7 @@ main :: proc() {
 
         tick_index += 1
         metrics := calculate_viking_metrics(c, drawdown, &state) 
-        broadcast_candle(c, metrics, status) 
+        broadcast_candle(c, metrics, status, poc_price) 
 
         // 1. Slow it down significantly. 
         // 100ms = 10 ticks per second (Good for "watching" the strategy)
@@ -228,7 +252,8 @@ calculate_viking_metrics :: proc(c: Candle, drawdown: f64, state: ^EngineState) 
     return kd
 }
 
-broadcast_candle :: proc(c: Candle, kd: KineticData, status: string) {
-    fmt.printf("candle:%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%s,%d,%.1f,%.1f\n", 
-        c.time, c.open, c.high, c.low, c.close, c.volume, c.indicator, status, kd.state_code, kd.lot_size, kd.probability)
+broadcast_candle :: proc(c: Candle, kd: KineticData, status: string, poc_price: f64) {
+    // Added an extra %.2f at the end for the POC, and added poc_price to the variables
+    fmt.printf("candle:%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%s,%d,%.1f,%.1f,%.2f\n", 
+        c.time, c.open, c.high, c.low, c.close, c.volume, c.indicator, status, kd.state_code, kd.lot_size, kd.probability, poc_price)
 }

@@ -154,6 +154,23 @@ Hooks.TradingTerminal = {
           playVikingChime(payload.signal);
       }
 
+      if (payload.poc) {
+        // 1. If the line already exists, remove the old one so we don't have 100 lines
+        if (this.pocLine) {
+          this.mainSeries.removePriceLine(this.pocLine);
+        }
+
+        // 2. Create the new POC Line
+        this.pocLine = this.mainSeries.createPriceLine({
+          price: payload.poc,
+          color: '#facc15', // Bright yellow/gold like your TV setup
+          lineWidth: 2,
+          lineStyle: 0, // Solid line
+          axisLabelVisible: true,
+          title: 'POC',
+        });
+      }
+
       const colors = {
         [2]:  { candle: '#00ff00', wick: '#00ff00' }, 
         [1]:  { candle: '#22c55e', wick: '#22c55e' }, 

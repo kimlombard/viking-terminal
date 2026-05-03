@@ -71,7 +71,7 @@ defmodule TradingLab.EnginePort do
   defp parse_csv(line) do
     # Odin Output: time, open, high, low, close, volume, indicator, status, state_code, lot, prob
     case String.split(line, ",") do
-      [t, o, h, l, c, v, ind, stat, sc, lot, prob] ->
+      [t, o, h, l, c, v, ind, stat, sc, lot, prob, poc] ->
         {:ok, %{
           time: String.to_integer(t),
           open: to_f(o),
@@ -83,7 +83,8 @@ defmodule TradingLab.EnginePort do
           status: stat,
           state: String.to_integer(String.trim(sc)),
           lot_size: to_f(lot),
-          probability: to_f(prob)
+          probability: to_f(prob),
+          poc_price: to_f(poc)
         }}
       _ ->
         :error

@@ -26,8 +26,6 @@ defmodule TradingLabWeb.HudLive do
   end
 
   # This is the "Safety Valve" that prevents the crash!
-  # This is the "Safety Valve" that prevents the crash!
-  # This is the "Safety Valve" that prevents the crash!
   def handle_info({:new_tick, data}, socket) do
     # 1. Push event to JS Chart
     socket = push_event(socket, "new_tick", %{
@@ -41,7 +39,8 @@ defmodule TradingLabWeb.HudLive do
       bsp_ema: data.bsp_ema, # <--- Add this line to forward the math to app.js!
       probability: data.probability,
       signal: data.signal,
-      ema: data.ema # <--- Add this line to forward the math to app.js!
+      ema: data.ema, # <--- Add this line to forward the math to app.js!
+      poc: data.poc_price # <--- Add this line to forward the POC price to app.js!
     })
 
     # --- GET CURRENT MEMORY ---
@@ -49,25 +48,28 @@ defmodule TradingLabWeb.HudLive do
 
     # --- CHECK FOR NEW SIGNAL & SAVE TO DB ---
     updated_signals = if data.signal do
-
-      # The Defensive Catch: Only save to DB if we actually have a user
-      db_or_temp_signal = if socket.assigns.user do
-        {:ok, saved_signal} = TradingLab.Trading.create_signal(%{
-          user_id: socket.assigns.user.id,
-          type: data.signal,
-          price: data.close,
-          time: data.time,
-          bsp: data.bsp,
-          prob: data.probability
-        })
-        saved_signal
+      # 1. Determine the signal to add
+      new_signal = if socket.assigns.user do
+        case TradingLab.Trading.create_signal(%{
+            user_id: socket.assigns.user.id,
+            type: data.signal,
+            price: data.close,
+            time: data.time,
+            bsp: data.bsp,
+            prob: data.probability
+          }) do
+            {:ok, saved_signal} ->
+              saved_signal # Return JUST the struct
+            {:error, changeset} ->
+              Logger.error("VIKING DB FAILURE: #{inspect(changeset.errors)}")
+              nil
+        end
       else
-        # If no user exists, just create a temporary map so the UI log still works!
-        %{type: data.signal, price: data.close, time: data.time}
+        %TradingLab.Trading.Signal{type: data.signal, price: data.close}
       end
 
-      # 2. Update the UI list using our saved or temporary signal
-      Enum.take([db_or_temp_signal | current_signals], 50)
+      # 2. Prepend only if the signal exists, then take 50
+      if new_signal, do: Enum.take([new_signal | current_signals], 50), else: current_signals
     else
       current_signals
     end
