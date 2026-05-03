@@ -63,8 +63,31 @@ Hooks.TradingTerminal = {
     });
 
     // 5. Handle Incoming Data
-    this.handleEvent("new_tick", (data) => {
+    this.handleEvent("new_tick", (payload) => {
       if (!this.mainSeries) return;
+
+      // 1. Initialize a markers array outside the event if it doesn't exist
+      this.markers = this.markers || [];
+
+      // 2. Check the incoming payload for a signal
+      if (payload.signal) {
+          const isBuy = payload.signal === "BUY";
+          
+          // Create the marker object
+          const newMarker = {
+              time: payload.time,
+              position: isBuy ? 'belowBar' : 'aboveBar',
+              color: isBuy ? '#26a69a' : '#ef5350',
+              shape: isBuy ? 'arrowUp' : 'arrowDown',
+              text: isBuy ? 'VIKING LONG' : 'VIKING SHORT',
+          };
+
+          // Add it to our collection
+          this.markers.push(newMarker);
+
+          // 3. Tell the price series to render the updated markers
+          this.mainSeries.setMarkers(this.markers);
+      }
 
       const colors = {
         [2]:  { candle: '#00ff00', wick: '#00ff00' }, 
@@ -74,15 +97,15 @@ Hooks.TradingTerminal = {
         [0]:  { candle: '#9ca3af', wick: '#9ca3af' }  
       };
 
-      const stateStyle = colors[data.state] || colors[0];
+      const stateStyle = colors[payload.state] || colors[0];
 
       this.mainSeries.update({
-        time: data.time, open: data.open, high: data.high, low: data.low, close: data.close,
+        time: payload.time, open: payload.open, high: payload.high, low: payload.low, close: payload.close,
         color: stateStyle.candle, wickColor: stateStyle.wick, borderColor: stateStyle.candle,
       });
       
-      if (data.bsp) this.bspSeries.update({ time: data.time, value: data.bsp });
-      if (data.probability) this.hmmSeries.update({ time: data.time, value: data.probability, color: stateStyle.candle });
+      if (payload.bsp) this.bspSeries.update({ time: payload.time, value: payload.bsp });
+      if (payload.probability) this.hmmSeries.update({ time: payload.time, value: payload.probability, color: stateStyle.candle });
     });
 
     // 6. Resize Observer (Using dataset checks)

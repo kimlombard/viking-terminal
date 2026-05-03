@@ -17,16 +17,29 @@ defmodule TradingLabWeb.HudLive do
   end
 
   # This is the "Safety Valve" that prevents the crash!
+  # This is the "Safety Valve" that prevents the crash!
   def handle_info({:new_tick, data}, socket) do
-    # 1. Update the Elixir state for the HTML Header
+    # 1. Push event to JS Chart
+    socket = push_event(socket, "new_tick", %{
+      time: data.time,
+      open: data.open,
+      high: data.high,
+      low: data.low,
+      close: data.close,
+      state: data.state,          # Using data.state from parse_csv
+      bsp: data.bsp,              # Using data.bsp from parse_csv
+      probability: data.probability,
+      signal: data.signal
+    })
+
+    # 2. Update the HUD Header variables
     socket = assign(socket,
       lot_size: data.lot_size,
-      prob: data.probability,
+      prob: data.probability,     # Already a float from parse_csv!
       status: data.status
     )
 
-    # 2. Push the payload to JavaScript for the Charts
-    {:noreply, push_event(socket, "new_tick", data)}
+    {:noreply, socket}
   end
 
   # Catch any other stray messages to prevent crashes

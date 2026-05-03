@@ -16,11 +16,22 @@ defmodule TradingLab.EnginePort do
   end
 
   # --- Handle Incoming Data ---
+  # --- Handle Incoming Data ---
   def handle_info({_port, {:data, {:eol, "candle:" <> raw_csv}}}, state) do
     case parse_csv(raw_csv) do
       {:ok, payload} ->
-        # Broadcast to "market_data" to match our HudLive mount and JS Hook
-        Phoenix.PubSub.broadcast(TradingLab.PubSub, "market_data", {:new_tick, payload})
+        # 1. Determine if we have a Viking Signal
+        signal = cond do
+          payload.bsp > 70.0 and payload.probability > 80.0 -> "BUY"
+          payload.bsp < -70.0 and payload.probability > 80.0 -> "SELL"
+          true -> nil
+        end
+
+        # 2. Add the signal to the payload map
+        enriched_payload = Map.put(payload, :signal, signal)
+
+        # 3. Broadcast the enriched payload
+        Phoenix.PubSub.broadcast(TradingLab.PubSub, "market_data", {:new_tick, enriched_payload})
 
       :error ->
         Logger.warning("Viking Port: Failed to parse malformed tick data.")

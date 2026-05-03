@@ -14,11 +14,12 @@
 
   <!-- The hook requires an ID, but we make it highly specific -->
   <main 
-    id="viking-terminal-engine" 
+    id="viking-terminal-engine-instance-1" 
     phx-hook="TradingTerminal" 
     phx-update="ignore"
     class="flex-grow flex flex-col p-2 gap-2"
-  >
+    >
+
     <!-- Replaced all IDs with data-target attributes -->
     <div data-target="main-chart" class="flex-[3] bg-black/20 rounded-lg border border-gray-800"></div>
     <div data-target="sub-pane-1" class="flex-1 bg-black/20 rounded-lg border border-gray-800"></div>
