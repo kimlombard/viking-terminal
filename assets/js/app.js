@@ -72,6 +72,13 @@ Hooks.TradingTerminal = {
     this.subChart1 = createChart(sub1El, { ...chartOptions, height: 150, timeScale: { ...chartOptions.timeScale, visible: false } });
     this.bspSeries = this.subChart1.addLineSeries({ color: '#3b82f6', lineWidth: 2 });
 
+    // NEW: The BSP Signal Line (EMA)
+    this.bspEmaSeries = this.subChart1.addLineSeries({ 
+      color: '#f59e0b', // A nice amber/orange color
+      lineWidth: 1, 
+      lineStyle: 2 // Dashed line so it doesn't overpower the main BSP
+    });
+
     // 3. Sub-Pane 2: HMM Probability (Histogram)
     this.subChart2 = createChart(sub2El, { ...chartOptions, height: 150, timeScale: { ...chartOptions.timeScale, visible: false } });
     this.hmmSeries = this.subChart2.addHistogramSeries({ color: '#eab308' });
@@ -163,6 +170,8 @@ Hooks.TradingTerminal = {
       });
       
       if (payload.bsp) this.bspSeries.update({ time: payload.time, value: payload.bsp });
+      // NEW: Update the Signal Line
+      if (payload.bsp_ema) this.bspEmaSeries.update({ time: payload.time, value: payload.bsp_ema });
       if (payload.probability) this.hmmSeries.update({ time: payload.time, value: payload.probability, color: stateStyle.candle });
     });
 

@@ -38,8 +38,10 @@ defmodule TradingLabWeb.HudLive do
       close: data.close,
       state: data.state,
       bsp: data.bsp,
+      bsp_ema: data.bsp_ema, # <--- Add this line to forward the math to app.js!
       probability: data.probability,
-      signal: data.signal
+      signal: data.signal,
+      ema: data.ema # <--- Add this line to forward the math to app.js!
     })
 
     # --- GET CURRENT MEMORY ---
@@ -47,20 +49,25 @@ defmodule TradingLabWeb.HudLive do
 
     # --- CHECK FOR NEW SIGNAL & SAVE TO DB ---
     updated_signals = if data.signal do
-      # 1. Save it to the Black Box
-      # Note: Since you are the only user in the lab right now, we can safely
-      # assign this to user_id: 1 (the account you just registered).
-      {:ok, db_signal} = TradingLab.Trading.create_signal(%{
-        user_id: socket.assigns.user.id,
-        type: data.signal,
-        price: data.close,
-        time: data.time,
-        bsp: data.bsp,
-        prob: data.probability
-      })
 
-      # 2. Update the UI list
-      Enum.take([db_signal | current_signals], 50)
+      # The Defensive Catch: Only save to DB if we actually have a user
+      db_or_temp_signal = if socket.assigns.user do
+        {:ok, saved_signal} = TradingLab.Trading.create_signal(%{
+          user_id: socket.assigns.user.id,
+          type: data.signal,
+          price: data.close,
+          time: data.time,
+          bsp: data.bsp,
+          prob: data.probability
+        })
+        saved_signal
+      else
+        # If no user exists, just create a temporary map so the UI log still works!
+        %{type: data.signal, price: data.close, time: data.time}
+      end
+
+      # 2. Update the UI list using our saved or temporary signal
+      Enum.take([db_or_temp_signal | current_signals], 50)
     else
       current_signals
     end

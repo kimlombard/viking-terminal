@@ -12,32 +12,48 @@ defmodule TradingLab.EnginePort do
     # We use :line mode to capture the \n delimited CSV from Odin
     port = Port.open({:spawn, @target_bin}, [:binary, :exit_status, :line])
     Logger.info("Viking Engine Bridge established via Port.")
-    {:ok, %{port: port}}
+   {:ok, %{port: port, last_bsp_ema: nil, last_ema: nil}}
   end
 
-  # --- Handle Incoming Data ---
   # --- Handle Incoming Data ---
   def handle_info({_port, {:data, {:eol, "candle:" <> raw_csv}}}, state) do
     case parse_csv(raw_csv) do
       {:ok, payload} ->
-        # 1. Determine if we have a Viking Signal
+
+        # --- 1. MAIN PRICE EMA CALCULATION ---
+        alpha = 0.1
+        current_close = payload.close
+        last_ema = state.last_ema || current_close # Safety net!
+        new_ema = (current_close * alpha) + (last_ema * (1.0 - alpha))
+
+        # --- 2. BSP SIGNAL LINE (EMA) CALCULATION ---
+        bsp_alpha = 0.15
+        current_bsp = payload.bsp
+        last_bsp_ema = state.last_bsp_ema || current_bsp # Safety net!
+        new_bsp_ema = (current_bsp * bsp_alpha) + (last_bsp_ema * (1.0 - bsp_alpha))
+
+        # --- 3. SIGNAL CALCULATION ---
         signal = cond do
           payload.bsp > 70.0 and payload.probability > 80.0 -> "BUY"
           payload.bsp < -70.0 and payload.probability > 80.0 -> "SELL"
           true -> nil
         end
 
-        # 2. Add the signal to the payload map
-        enriched_payload = Map.put(payload, :signal, signal)
-
-        # 3. Broadcast the enriched payload
+        # --- 4. BROADCAST ---
+        enriched_payload = Map.merge(payload, %{
+          signal: signal,
+          ema: new_ema,
+          bsp_ema: new_bsp_ema
+        })
         Phoenix.PubSub.broadcast(TradingLab.PubSub, "market_data", {:new_tick, enriched_payload})
+
+        # --- 5. UPDATE STATE (Save both memories for the next tick) ---
+        {:noreply, %{state | last_ema: new_ema, last_bsp_ema: new_bsp_ema}}
 
       :error ->
         Logger.warning("Viking Port: Failed to parse malformed tick data.")
+        {:noreply, state}
     end
-
-    {:noreply, state}
   end
 
   # --- Handle Engine Crashes ---
