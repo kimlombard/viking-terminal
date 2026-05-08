@@ -34,7 +34,70 @@ EngineState :: struct {
     transitions:    [4][4]int,    
 }
 
+// --- ALMA ENGINE (Arnaud Legoux Moving Average) ---
+AlmaState :: struct {
+    period:     int,
+    window:     [dynamic]f64,
+    weights:    [dynamic]f64,
+    weight_sum: f64,
+    index:      int,
+    filled:     bool,
+}
+
+// --- MITIGATION ZONES (Ghost Levels) ---
+ZoneType :: enum { POC, VAH, VAL }
+
+MitigationZone :: struct {
+    price:      f64,
+    z_type:     ZoneType,
+    is_bullish: bool, // true if created by an UPWARD break
+    active:     bool,
+    created_at: i64,
+}
+
+// Boot up the ALMA and pre-calculate the heavy Gaussian math
+init_alma :: proc(period: int, offset: f64, sigma: f64) -> AlmaState {
+    state: AlmaState
+    state.period = period
+    state.window = make([dynamic]f64, period)
+    state.weights = make([dynamic]f64, period)
+    
+    m := offset * f64(period - 1)
+    s := f64(period) / sigma
+
+    for i := 0; i < period; i += 1 {
+        // The Gaussian distribution formula
+        w := math.exp(-((f64(i) - m) * (f64(i) - m)) / (2.0 * s * s))
+        state.weights[i] = w
+        state.weight_sum += w
+    }
+    
+    return state
+}
+
+// The ultra-fast, per-tick update
+update_alma :: proc(state: ^AlmaState, price: f64) -> f64 {
+    // 1. Add newest price to our rolling circular buffer
+    state.window[state.index] = price
+    state.index = (state.index + 1) % state.period
+    
+    // Check if we have enough data to calculate a true ALMA
+    if state.index == 0 do state.filled = true
+    if !state.filled do return price 
+
+    // 2. Apply the pre-calculated weights to the price window
+    alma: f64 = 0.0
+    for i := 0; i < state.period; i += 1 {
+        // We iterate from the oldest price in the buffer to the newest
+        buffer_idx := (state.index + i) % state.period
+        alma += state.window[buffer_idx] * state.weights[i]
+    }
+
+    return alma / state.weight_sum
+}
+
 main :: proc() {
+    kd: KineticData
     // --- 1. BOOT THE LUA BRAIN ---
     L := lua.L_newstate()
     if L == nil {
@@ -101,6 +164,15 @@ main :: proc() {
     // Initialize the volume profile map (Price -> Volume)
     volume_profile := make(map[f64]f64)
 
+    // Initialize the ALMA States
+    alma20_high_state := init_alma(20, 0.85, 6.0)
+    alma20_low_state := init_alma(20, 0.85, 6.0)
+    alma200_high_state := init_alma(200, 0.85, 6.0)
+    alma200_low_state := init_alma(200, 0.85, 6.0)
+
+    // --- NEW: The Ghost Level Tracker ---
+    active_zones := make([dynamic]MitigationZone)
+
     // --- 4. THE HISTORICAL PROCESSING LOOP ---
     for i := 3; i < len(lines); i += 1 {
         line := lines[i]
@@ -134,12 +206,54 @@ main :: proc() {
         max_volume: f64 = 0.0
         poc_price: f64 = c.close // Default to current price
 
-        for price, vol in volume_profile {
-            if vol > max_volume {
-                max_volume = vol
-                poc_price = price
+        // --- NEW: THE TRUE VALUE AREA (70%) ALGORITHM (Float-Safe) ---
+        total_session_vol: f64 = 0.0
+        for _, vol in volume_profile {
+            total_session_vol += vol
+        }
+
+        target_vol := total_session_vol * 0.70
+        current_va_vol := volume_profile[poc_price]
+        
+        vah := poc_price
+        val := poc_price
+
+        // Expand outwards until we capture 70% of the volume
+        for current_va_vol < target_vol {
+            // Find the immediate next traded price level UP
+            next_up_price: f64 = 999999.0
+            up_vol: f64 = 0.0
+            for p, v in volume_profile {
+                if p > vah && p < next_up_price {
+                    next_up_price = p
+                    up_vol = v
+                }
+            }
+
+            // Find the immediate next traded price level DOWN
+            next_down_price: f64 = -1.0
+            down_vol: f64 = 0.0
+            for p, v in volume_profile {
+                if p < val && p > next_down_price {
+                    next_down_price = p
+                    down_vol = v
+                }
+            }
+
+            if up_vol == 0.0 && down_vol == 0.0 {
+                break // Safety break: No more volume to expand into
+            }
+
+            // Consume the node with the highest volume
+            if up_vol >= down_vol {
+                current_va_vol += up_vol
+                vah = next_up_price
+            } else {
+                current_va_vol += down_vol
+                val = next_down_price
             }
         }
+        // --- END VALUE AREA ALGORITHM ---
 
         // --- THE LUA HANDOFF ---
         lua.getglobal(L, "on_tick") 
@@ -159,8 +273,68 @@ main :: proc() {
 
         tick_index += 1
         metrics := calculate_viking_metrics(c, drawdown, &state) 
-        broadcast_candle(c, metrics, status, poc_price) 
 
+        // --- Calculate Live ALMA ---
+        live_alma20_high := update_alma(&alma20_high_state, c.high)
+        live_alma20_low := update_alma(&alma20_low_state, c.low)
+        live_alma200_high := update_alma(&alma200_high_state, c.high)
+        live_alma200_low := update_alma(&alma200_low_state, c.low)
+
+        // ==========================================
+        // --- PHASE 1: MITIGATION CHECK ---
+        // Has the price returned to fill a ghost level?
+        // ==========================================
+        for j := 0; j < len(active_zones); j += 1 {
+            if !active_zones[j].active do continue
+            z := &active_zones[j]
+            
+            // If it was a Bullish break, the whale left orders BELOW current price.
+            // It mitigates if the candle's LOW touches or drops below the zone.
+            if z.is_bullish && c.low <= z.price {
+                z.active = false
+                fmt.printf("[ODIN] 👻 GHOST LEVEL MITIGATED: %f (Bullish %v filled)\n", z.price, z.z_type)
+            } else if !z.is_bullish && c.high >= z.price {
+                // Notice the '} else if' is on the same line!
+                z.active = false
+                fmt.printf("[ODIN] 👻 GHOST LEVEL MITIGATED: %f (Bearish %v filled)\n", z.price, z.z_type)
+            }
+        }
+
+        // ==========================================
+        // --- PHASE 2: NEW WHALE FOOTPRINTS ---
+        // Did we violently slice through a key node?
+        // ==========================================
+        if state.is_seeded {
+            // Check for BULLISH Hyper Velocity (State 2)
+            if kd.state_code == 2 { 
+                if state.prev_close < poc_price && c.close > poc_price {
+                    append(&active_zones, MitigationZone{price = poc_price, z_type = .POC, is_bullish = true, active = true, created_at = c.time})
+                    fmt.printf("[ODIN] 🐋 WHALE FOOTPRINT: Bullish punch through POC at %f\n", poc_price)
+                }
+                if state.prev_close < vah && c.close > vah {
+                    append(&active_zones, MitigationZone{price = vah, z_type = .VAH, is_bullish = true, active = true, created_at = c.time})
+                    fmt.printf("[ODIN] 🐋 WHALE FOOTPRINT: Bullish punch through VAH at %f\n", vah)
+                }
+                if state.prev_close < val && c.close > val {
+                    append(&active_zones, MitigationZone{price = val, z_type = .VAL, is_bullish = true, active = true, created_at = c.time})
+                }
+            } else if kd.state_code == -2 {
+                // Notice the '} else if' is on the same line!
+                if state.prev_close > poc_price && c.close < poc_price {
+                    append(&active_zones, MitigationZone{price = poc_price, z_type = .POC, is_bullish = false, active = true, created_at = c.time})
+                    fmt.printf("[ODIN] 🐋 WHALE FOOTPRINT: Bearish punch through POC at %f\n", poc_price)
+                }
+                if state.prev_close > val && c.close < val {
+                    append(&active_zones, MitigationZone{price = val, z_type = .VAL, is_bullish = false, active = true, created_at = c.time})
+                    fmt.printf("[ODIN] 🐋 WHALE FOOTPRINT: Bearish punch through VAL at %f\n", val)
+                }
+                if state.prev_close > vah && c.close < vah {
+                    append(&active_zones, MitigationZone{price = vah, z_type = .VAH, is_bullish = false, active = true, created_at = c.time})
+                }
+            }
+        }
+
+        broadcast_candle(c, metrics, status, poc_price, vah, val, live_alma20_high, live_alma20_low, live_alma200_high, live_alma200_low, &active_zones)
         // 1. Slow it down significantly. 
         // 100ms = 10 ticks per second (Good for "watching" the strategy)
         // 500ms = 2 ticks per second (Very calm, easy to debug)
@@ -252,8 +426,34 @@ calculate_viking_metrics :: proc(c: Candle, drawdown: f64, state: ^EngineState) 
     return kd
 }
 
-broadcast_candle :: proc(c: Candle, kd: KineticData, status: string, poc_price: f64) {
-    // Added an extra %.2f at the end for the POC, and added poc_price to the variables
-    fmt.printf("candle:%d,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%s,%d,%.1f,%.1f,%.2f\n", 
-        c.time, c.open, c.high, c.low, c.close, c.volume, c.indicator, status, kd.state_code, kd.lot_size, kd.probability, poc_price)
+broadcast_candle :: proc(c: Candle, kd: KineticData, status: string, poc_price: f64, vah: f64, val: f64, alma20_high: f64, alma20_low: f64, alma200_high: f64, alma200_low: f64, active_zones: ^[dynamic]MitigationZone) {
+    
+    // 1. Pack the active zones into a string
+    b: strings.Builder
+    strings.builder_init(&b)
+    defer strings.builder_destroy(&b)
+
+    active_count := 0
+    for z in active_zones {
+        if z.active {
+            bull_flag := z.is_bullish ? 1 : 0
+            fmt.sbprintf(&b, "%f:%d|", z.price, bull_flag)
+            active_count += 1
+        }
+    }
+    
+    ghost_str := strings.to_string(b)
+    if active_count == 0 {
+        ghost_str = "none"
+    }
+
+    // 2. The perfectly widened 19-variable print statement
+    // Ensure there are 18 commas (19 values total)
+    fmt.printf("candle:%v,%f,%f,%f,%f,%f,%f,%s,%d,%f,%f,%f,%f,%f,%f,%f,%f,%f,%s\n", 
+        c.time, c.open, c.high, c.low, c.close, c.volume, c.indicator, 
+        status, kd.state_code, kd.lot_size, kd.probability, poc_price, 
+        vah, val, 
+        alma20_high, alma20_low, alma200_high, alma200_low, // The 4 ALMA channels
+        ghost_str
+    )
 }

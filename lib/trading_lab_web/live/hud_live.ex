@@ -36,11 +36,18 @@ defmodule TradingLabWeb.HudLive do
       close: data.close,
       state: data.state,
       bsp: data.bsp,
-      bsp_ema: data.bsp_ema, # <--- Add this line to forward the math to app.js!
+      bsp_ema: data.bsp_ema,
       probability: data.probability,
       signal: data.signal,
-      ema: data.ema, # <--- Add this line to forward the math to app.js!
-      poc: data.poc_price # <--- Add this line to forward the POC price to app.js!
+      ema: data.ema,
+      poc: data.poc_price,
+      vah: data.vah,
+      val: data.val,
+      alma20_high: data.alma20_high,
+      alma20_low: data.alma20_low,
+      alma200_high: data.alma200_high,
+      alma200_low: data.alma200_low,
+      ghosts: data.ghosts
     })
 
     # --- GET CURRENT MEMORY ---

@@ -69,9 +69,10 @@ defmodule TradingLab.EnginePort do
   # --- Private Helpers ---
 
   defp parse_csv(line) do
-    # Odin Output: time, open, high, low, close, volume, indicator, status, state_code, lot, prob
-    case String.split(line, ",") do
-      [t, o, h, l, c, v, ind, stat, sc, lot, prob, poc] ->
+    # Expanded Odin Output: time, open, high, low, close, volume, bsp, status, state, lot, prob, poc, vah, val, alma20_high, alma20_low, alma200_high, alma200_low, ghosts
+    case String.split(String.trim(line), ",") do
+      # This must match the Odin printf EXACTLY column for column
+      [t, o, h, l, c, v, ind, stat, sc, lot, prob, poc, vah, val, alma20_high, alma20_low, alma200_high, alma200_low, ghosts] ->
         {:ok, %{
           time: String.to_integer(t),
           open: to_f(o),
@@ -84,11 +85,29 @@ defmodule TradingLab.EnginePort do
           state: String.to_integer(String.trim(sc)),
           lot_size: to_f(lot),
           probability: to_f(prob),
-          poc_price: to_f(poc)
+          poc_price: to_f(poc),
+          vah: to_f(vah),
+          val: to_f(val),
+          alma20_high: to_f(alma20_high),
+          alma20_low: to_f(alma20_low),
+          alma200_high: to_f(alma200_high),
+          alma200_low: to_f(alma200_low),
+          ghosts: parse_ghosts(String.trim(ghosts))
         }}
       _ ->
         :error
     end
+  end
+
+  # Helper to decode the string "18240.5:1|18200.0:0|" into Elixir Maps
+  defp parse_ghosts("none"), do: []
+  defp parse_ghosts(ghost_str) do
+    ghost_str
+    |> String.split("|", trim: true)
+    |> Enum.map(fn g ->
+      [price_str, bull_str] = String.split(g, ":")
+      %{price: to_f(price_str), is_bullish: bull_str == "1"}
+    end)
   end
 
   defp to_f(val) do

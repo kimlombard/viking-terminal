@@ -44,3 +44,5 @@ trading_lab-*.tar
 npm-debug.log
 /assets/node_modules/
 .elixir_ls/
+
+viking_brain.txt

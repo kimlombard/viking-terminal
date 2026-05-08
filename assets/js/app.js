@@ -64,33 +64,91 @@ Hooks.TradingTerminal = {
     const sub1El = this.el.querySelector('[data-target="sub-pane-1"]');
     const sub2El = this.el.querySelector('[data-target="sub-pane-2"]');
 
-    // 1. Main Price Chart
-    this.mainChart = createChart(mainEl, { ...chartOptions, height: 400 });
+    this.mainChart = createChart(mainEl, chartOptions);
+
+    // --- 1. THE VAH BASE FILL (Bottom Layer) ---
+    this.vahSeries = this.mainChart.addAreaSeries({ 
+      lineColor: '#38bdf8', // Blue boundary
+      topColor: 'rgba(56, 189, 248, 0.45)', // Semi-transparent blue fill
+      bottomColor: 'rgba(56, 189, 248, 0.45)', 
+      lineWidth: 1, 
+      lineStyle: 2,     // Dashed line
+      crosshairMarkerVisible: false,
+      priceLineVisible: false
+    });
+
+    // --- 2. THE VAL MASK (Middle Layer) ---
+    this.valSeries = this.mainChart.addAreaSeries({ 
+      lineColor: '#38bdf8', // Blue boundary
+      topColor: '#111827',  // SOLID BACKGROUND COLOR (Masks the VAH fill!)
+      bottomColor: '#111827', 
+      lineWidth: 1, 
+      lineStyle: 2,     // Dashed line
+      crosshairMarkerVisible: false,
+      priceLineVisible: false
+    });
+
+    const channelOptions = {
+      color: 'rgba(56, 189, 248, 0.45)', // Semi-transparent blue for the channels
+      lineWidth: 1,
+      lineStyle: 2, // Dashed line
+      crosshairMarkerVisible: false,
+      priceLineVisible: false
+    };
+
+    // --- 3. THE PRICE CANDLES (Foreground) ---
     this.mainSeries = this.mainChart.addCandlestickSeries();
 
+    // --- 1. THE VAH BASE FILL (Bottom Layer) ---
+    this.vahSeries = this.mainChart.addAreaSeries({ 
+      lineColor: '#38bdf8', 
+      topColor: 'rgba(56, 189, 248, 0.45)', 
+      bottomColor: 'rgba(56, 189, 248, 0.45)', 
+      lineWidth: 1, 
+      lineStyle: 2,     
+      crosshairMarkerVisible: false,
+      priceLineVisible: false
+    });
+
+    // --- 2. THE VAL MASK (Middle Layer) ---
+    this.valSeries = this.mainChart.addAreaSeries({ 
+      lineColor: '#38bdf8', 
+      topColor: '#111827',  
+      bottomColor: '#111827', 
+      lineWidth: 1, 
+      lineStyle: 2,     
+      crosshairMarkerVisible: false,
+      priceLineVisible: false
+    });
+
+    // --- 3. THE PRICE CANDLES (Foreground) ---
+    this.mainSeries = this.mainChart.addCandlestickSeries();
+    
+    // --- 4. THE ALMA CHANNELS ---
+    this.alma20High = this.mainChart.addLineSeries({ color: '#38bdf8', lineWidth: 1, crosshairMarkerVisible: false, priceLineVisible: false });
+    this.alma20Low = this.mainChart.addLineSeries({ color: '#38bdf8', lineWidth: 1, crosshairMarkerVisible: false, priceLineVisible: false });
+    this.alma200High = this.mainChart.addLineSeries({ color: '#c084fc', lineWidth: 1, crosshairMarkerVisible: false, priceLineVisible: false });
+    this.alma200Low = this.mainChart.addLineSeries({ color: '#c084fc', lineWidth: 1, crosshairMarkerVisible: false, priceLineVisible: false });
+
+    // --- 5. THE POC RIBBON (Top Layer) ---
+    this.pocSeries = this.mainChart.addLineSeries({
+      color: '#facc15', lineWidth: 2, lineStyle: 0, crosshairMarkerVisible: false, priceLineVisible: false
+    });
+    
     // 2. Sub-Pane 1: Adaptive BSP (Line)
     this.subChart1 = createChart(sub1El, { ...chartOptions, height: 150, timeScale: { ...chartOptions.timeScale, visible: false } });
     this.bspSeries = this.subChart1.addLineSeries({ color: '#3b82f6', lineWidth: 2 });
 
     // NEW: The BSP Signal Line (EMA)
     this.bspEmaSeries = this.subChart1.addLineSeries({ 
-      color: '#f59e0b', // A nice amber/orange color
+      color: '#f59e0b', 
       lineWidth: 1, 
-      lineStyle: 2 // Dashed line so it doesn't overpower the main BSP
+      lineStyle: 2 
     });
 
     // 3. Sub-Pane 2: HMM Probability (Histogram)
     this.subChart2 = createChart(sub2El, { ...chartOptions, height: 150, timeScale: { ...chartOptions.timeScale, visible: false } });
     this.hmmSeries = this.subChart2.addHistogramSeries({ color: '#eab308' });
-
-    // Inside Hooks.TradingTerminal.mounted()
-    this.emaSeries = this.mainChart.addLineSeries({ 
-      color: '#f1f5f9', 
-      lineWidth: 1, 
-      lineStyle: 2, // Dashed line for visual distinction
-      lastValueVisible: false,
-      priceLineVisible: false
-    });
 
     // 4. Unified Synchronization
     const syncGroup = [
@@ -123,11 +181,6 @@ Hooks.TradingTerminal = {
     this.handleEvent("new_tick", (payload) => {
       if (!this.mainSeries) return;
 
-      // Inside this.handleEvent("new_tick")
-      if (payload.ema) {
-        this.emaSeries.update({ time: payload.time, value: payload.ema });
-      }
-
       // 1. Initialize a markers array outside the event if it doesn't exist
       this.markers = this.markers || [];
 
@@ -135,7 +188,6 @@ Hooks.TradingTerminal = {
       if (payload.signal) {
           const isBuy = payload.signal === "BUY";
           
-          // Create the marker object
           const newMarker = {
               time: payload.time,
               position: isBuy ? 'belowBar' : 'aboveBar',
@@ -144,30 +196,51 @@ Hooks.TradingTerminal = {
               text: isBuy ? 'VIKING LONG' : 'VIKING SHORT',
           };
 
-          // Add it to our collection
           this.markers.push(newMarker);
-
-          // 3. Tell the price series to render the updated markers
           this.mainSeries.setMarkers(this.markers);
-
-          // --- RING THE BELL ---
           playVikingChime(payload.signal);
       }
 
-      if (payload.poc) {
-        // 1. If the line already exists, remove the old one so we don't have 100 lines
-        if (this.pocLine) {
-          this.mainSeries.removePriceLine(this.pocLine);
+      // --- ALMA Channels ---
+      if (payload.alma20_high) this.alma20High.update({ time: payload.time, value: payload.alma20_high });
+      if (payload.alma20_low) this.alma20Low.update({ time: payload.time, value: payload.alma20_low });
+      if (payload.alma200_high) this.alma200High.update({ time: payload.time, value: payload.alma200_high });
+      if (payload.alma200_low) this.alma200Low.update({ time: payload.time, value: payload.alma200_low });
+
+      // --- Dynamic Channels (VAH & VAL) and POC Ribbon ---
+      if (payload.vah) this.vahSeries.update({ time: payload.time, value: payload.vah });
+      if (payload.val) this.valSeries.update({ time: payload.time, value: payload.val });
+      if (payload.poc) this.pocSeries.update({ time: payload.time, value: payload.poc });
+
+      // --- GHOST LEVELS (Mitigation Zones) ---
+      // We use a Map to keep track of the lines we've drawn
+      this.activeGhostLines = this.activeGhostLines || new Map();
+
+      if (payload.ghosts) {
+        // Create a Set of current active prices from the backend
+        const currentPrices = new Set(payload.ghosts.map(g => g.price));
+
+        // 1. Remove lines that are NO LONGER active (Mitigated by a Whale!)
+        for (let [price, line] of this.activeGhostLines.entries()) {
+          if (!currentPrices.has(price)) {
+            this.mainSeries.removePriceLine(line);
+            this.activeGhostLines.delete(price);
+          }
         }
 
-        // 2. Create the new POC Line
-        this.pocLine = this.mainSeries.createPriceLine({
-          price: payload.poc,
-          color: '#facc15', // Bright yellow/gold like your TV setup
-          lineWidth: 2,
-          lineStyle: 0, // Solid line
-          axisLabelVisible: true,
-          title: 'POC',
+        // 2. Draw new Ghost Levels that just spawned
+        payload.ghosts.forEach(g => {
+          if (!this.activeGhostLines.has(g.price)) {
+            const line = this.mainSeries.createPriceLine({
+              price: g.price,
+              color: g.is_bullish ? '#22c55e' : '#ef4444', // Neon Green / Neon Red
+              lineWidth: 2,
+              lineStyle: 1, // Dotted Line
+              axisLabelVisible: true,
+              title: g.is_bullish ? '🐳 BULL GHOST' : '🐋 BEAR GHOST',
+            });
+            this.activeGhostLines.set(g.price, line);
+          }
         });
       }
 
