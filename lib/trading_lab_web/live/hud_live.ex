@@ -47,7 +47,8 @@ defmodule TradingLabWeb.HudLive do
       alma20_low: data.alma20_low,
       alma200_high: data.alma200_high,
       alma200_low: data.alma200_low,
-      ghosts: data.ghosts
+      ghosts: data.ghosts,
+      whale_alert: data.whale_alert
     })
 
     # --- GET CURRENT MEMORY ---

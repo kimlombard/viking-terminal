@@ -334,7 +334,26 @@ main :: proc() {
             }
         }
 
-        broadcast_candle(c, metrics, status, poc_price, vah, val, live_alma20_high, live_alma20_low, live_alma200_high, live_alma200_low, &active_zones)
+        // --- WHALE ABSORPTION LOGIC ---
+        whale_signal := "none"
+        avg_vol := total_session_vol / f64(tick_index)
+        
+        // If volume is 3x the average and we are within 2 ticks of a key level
+        at_key_level := (math.abs(c.close - poc_price) <= tick_size * 2.0) || 
+                        (math.abs(c.close - vah) <= tick_size * 2.0) || 
+                        (math.abs(c.close - val) <= tick_size * 2.0)
+
+        if c.volume > (avg_vol * 3.0) && at_key_level {
+            // High Volume + Small Candle Range = Absorption
+            candle_range := math.abs(c.high - c.low)
+            if candle_range < (state.prev_atr * 0.5) {
+                whale_signal = "ABSORPTION"
+            } else {
+                whale_signal = "EXHAUSTION"
+            }
+        }
+
+        broadcast_candle(c, metrics, status, poc_price, vah, val, live_alma20_high, live_alma20_low, live_alma200_high, live_alma200_low, &active_zones, whale_signal)
         // 1. Slow it down significantly. 
         // 100ms = 10 ticks per second (Good for "watching" the strategy)
         // 500ms = 2 ticks per second (Very calm, easy to debug)
@@ -426,7 +445,7 @@ calculate_viking_metrics :: proc(c: Candle, drawdown: f64, state: ^EngineState) 
     return kd
 }
 
-broadcast_candle :: proc(c: Candle, kd: KineticData, status: string, poc_price: f64, vah: f64, val: f64, alma20_high: f64, alma20_low: f64, alma200_high: f64, alma200_low: f64, active_zones: ^[dynamic]MitigationZone) {
+broadcast_candle :: proc(c: Candle, kd: KineticData, status: string, poc_price: f64, vah: f64, val: f64, alma20_high: f64, alma20_low: f64, alma200_high: f64, alma200_low: f64, active_zones: ^[dynamic]MitigationZone, whale_signal: string) {
     
     // 1. Pack the active zones into a string
     b: strings.Builder
@@ -449,11 +468,12 @@ broadcast_candle :: proc(c: Candle, kd: KineticData, status: string, poc_price: 
 
     // 2. The perfectly widened 19-variable print statement
     // Ensure there are 18 commas (19 values total)
-    fmt.printf("candle:%v,%f,%f,%f,%f,%f,%f,%s,%d,%f,%f,%f,%f,%f,%f,%f,%f,%f,%s\n", 
+    fmt.printf("candle:%v,%f,%f,%f,%f,%f,%f,%s,%d,%f,%f,%f,%f,%f,%f,%f,%f,%f,%s,%s\n", 
         c.time, c.open, c.high, c.low, c.close, c.volume, c.indicator, 
         status, kd.state_code, kd.lot_size, kd.probability, poc_price, 
         vah, val, 
         alma20_high, alma20_low, alma200_high, alma200_low, // The 4 ALMA channels
-        ghost_str
+        ghost_str,
+        whale_signal,
     )
 }

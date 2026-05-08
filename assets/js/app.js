@@ -244,6 +244,21 @@ Hooks.TradingTerminal = {
         });
       }
 
+      // --- WHALE ALERTS ---
+      if (payload.whale_alert && payload.whale_alert !== "none") {
+          const isAbs = payload.whale_alert === "ABSORPTION";
+          
+          this.markers.push({
+              time: payload.time,
+              position: 'inBar',
+              color: isAbs ? '#facc15' : '#f43f5e', // Gold for Absorption, Rose for Exhaustion
+              shape: 'circle',
+              text: isAbs ? '🐋 ABSORPTION' : '💨 EXHAUSTION',
+          });
+
+          this.mainSeries.setMarkers(this.markers);
+      }
+
       const colors = {
         [2]:  { candle: '#00ff00', wick: '#00ff00' }, 
         [1]:  { candle: '#22c55e', wick: '#22c55e' }, 
