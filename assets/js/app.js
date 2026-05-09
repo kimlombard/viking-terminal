@@ -64,6 +64,72 @@ Hooks.TradingTerminal = {
     const sub1El = this.el.querySelector('[data-target="sub-pane-1"]');
     const sub2El = this.el.querySelector('[data-target="sub-pane-2"]');
 
+    // --- PANE RESIZING LOGIC ---
+    const container = this.el;
+    const resizers = container.querySelectorAll('[data-resizer]');
+    
+    let isDragging = false;
+    let currentResizer = null;
+    let startY = 0;
+    let startHeights = [];
+    let panes = [mainEl, sub1El, sub2El];
+
+    resizers.forEach(resizer => {
+      resizer.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        currentResizer = parseInt(resizer.dataset.resizer);
+        startY = e.clientY;
+        
+        // Record starting heights in pixels
+        startHeights = panes.map(pane => pane.getBoundingClientRect().height);
+        
+        // Prevent text selection while dragging
+        document.body.style.userSelect = 'none';
+        document.body.style.cursor = 'row-resize';
+      });
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+
+      const deltaY = e.clientY - startY;
+      const totalHeight = container.getBoundingClientRect().height;
+
+      if (currentResizer === 1) {
+        // Dragging the first resizer (between Main and Sub 1)
+        const newMainHeight = Math.max(150, startHeights[0] + deltaY);
+        const newSub1Height = Math.max(50, startHeights[1] - deltaY);
+        
+        // Only apply if neither hits their minimum
+        if (newMainHeight > 150 && newSub1Height > 50) {
+            // UPDATED: Set the flex property instead of height
+            mainEl.style.flex = `0 0 ${(newMainHeight / totalHeight) * 100}%`;
+            sub1El.style.flex = `0 0 ${(newSub1Height / totalHeight) * 100}%`;
+        }
+
+      } else if (currentResizer === 2) {
+        // Dragging the second resizer (between Sub 1 and Sub 2)
+        const newSub1Height = Math.max(50, startHeights[1] + deltaY);
+        const newSub2Height = Math.max(50, startHeights[2] - deltaY);
+
+        if (newSub1Height > 50 && newSub2Height > 50) {
+             // UPDATED: Set the flex property instead of height
+            sub1El.style.flex = `0 0 ${(newSub1Height / totalHeight) * 100}%`;
+            sub2El.style.flex = `0 0 ${(newSub2Height / totalHeight) * 100}%`;
+        }
+      }
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (isDragging) {
+        isDragging = false;
+        currentResizer = null;
+        document.body.style.userSelect = '';
+        document.body.style.cursor = '';
+      }
+    });
+    // --- END PANE RESIZING LOGIC ---
+
     this.mainChart = createChart(mainEl, chartOptions);
 
     // --- 1. THE VAH BASE FILL (Bottom Layer) ---
@@ -258,6 +324,37 @@ Hooks.TradingTerminal = {
 
           this.mainSeries.setMarkers(this.markers);
       }
+
+      // --- EXECUTION MARKERS (Tracking Broker State) ---
+      // Initialize our state tracker if it doesn't exist
+      this.lastPosition = typeof this.lastPosition !== 'undefined' ? this.lastPosition : 0;
+      
+      // 1. Detect a LONG Entry (Flipped from Flat to Long)
+      if (this.lastPosition === 0 && payload.position === 1) {
+          this.markers.push({ 
+              time: payload.time, position: 'belowBar', color: '#22c55e', shape: 'arrowUp', text: '⚔️ ENTER LONG' 
+          });
+          playVikingChime("BUY");
+      } 
+      // 2. Detect a SHORT Entry (Flipped from Flat to Short)
+      else if (this.lastPosition === 0 && payload.position === -1) {
+          this.markers.push({ 
+              time: payload.time, position: 'aboveBar', color: '#ef4444', shape: 'arrowDown', text: '⚔️ ENTER SHORT' 
+          });
+          playVikingChime("SELL"); // Assuming your audio engine maps SELL to the low pitch
+      } 
+      // 3. Detect a POSITION CLOSE (Flipped from Active back to Flat)
+      else if (this.lastPosition !== 0 && payload.position === 0) {
+          this.markers.push({ 
+              time: payload.time, position: 'inBar', color: '#3b82f6', shape: 'circle', text: '🛡️ CLOSED' 
+          });
+      }
+
+      // Save the current state for the next tick
+      this.lastPosition = payload.position;
+      
+      // Commit the markers to the glass
+      this.mainSeries.setMarkers(this.markers);
 
       const colors = {
         [2]:  { candle: '#00ff00', wick: '#00ff00' }, 

@@ -55,6 +55,23 @@ MitigationZone :: struct {
     created_at: i64,
 }
 
+// --- EXECUTION MODULE (The Broker) ---
+PositionType :: enum { NONE, LONG, SHORT }
+
+Position :: struct {
+    type:        PositionType,
+    entry_price: f64,
+    size:        f64,
+    sl:          f64, // Stop Loss
+    tp:          f64, // Take Profit
+    pnl:         f64,
+}
+
+Broker :: struct {
+    balance:  f64,
+    position: Position,
+}
+
 // Boot up the ALMA and pre-calculate the heavy Gaussian math
 init_alma :: proc(period: int, offset: f64, sigma: f64) -> AlmaState {
     state: AlmaState
@@ -95,6 +112,14 @@ update_alma :: proc(state: ^AlmaState, price: f64) -> f64 {
 
     return alma / state.weight_sum
 }
+
+// --- NEW: Initialize the Broker ---
+    broker := Broker{ 
+        balance = 100000.0, // $100k Starting Capital
+        position = Position{type = .NONE} 
+    }
+
+    // --- 4. THE HISTORICAL PROCESSING LOOP ---
 
 main :: proc() {
     kd: KineticData
@@ -353,7 +378,63 @@ main :: proc() {
             }
         }
 
-        broadcast_candle(c, metrics, status, poc_price, vah, val, live_alma20_high, live_alma20_low, live_alma200_high, live_alma200_low, &active_zones, whale_signal)
+        // ==========================================
+        // --- THE BROKER: EXECUTION & MANAGEMENT ---
+        // ==========================================
+        
+        // 1. Manage Active Position (Calculate PnL & Check Exits)
+        if broker.position.type != .NONE {
+            // Calculate Unrealized PnL (assuming $10 per point for a standard lot)
+            point_value := 10.0 * broker.position.size
+            if broker.position.type == .LONG {
+                broker.position.pnl = (c.close - broker.position.entry_price) * point_value
+                // Exit Long (SL or TP)
+                if c.close <= broker.position.sl || c.close >= broker.position.tp {
+                    broker.balance += broker.position.pnl
+                    broker.position = Position{type = .NONE} // Close position
+                    fmt.printf("[EXECUTION] 🛡️ CLOSED LONG at %f | Balance: $%.2f\n", c.close, broker.balance)
+                }
+            } else if broker.position.type == .SHORT {
+                broker.position.pnl = (broker.position.entry_price - c.close) * point_value
+                // Exit Short (SL or TP)
+                if c.close >= broker.position.sl || c.close <= broker.position.tp {
+                    broker.balance += broker.position.pnl
+                    broker.position = Position{type = .NONE} // Close position
+                    fmt.printf("[EXECUTION] 🛡️ CLOSED SHORT at %f | Balance: $%.2f\n", c.close, broker.balance)
+                }
+            }
+        }
+
+        // 2. Confluence Entry Logic (Only if flat)
+        if broker.position.type == .NONE && whale_signal == "ABSORPTION" {
+            risk_points := state.prev_atr * 2.0 // Dynamic Stop Loss based on volatility
+            
+            // CONFLUENCE: Bullish Flow (State 2) + Whale Absorption at VAL
+            if kd.state_code == 2 && math.abs(c.close - val) <= tick_size * 2.0 {
+                broker.position = Position{
+                    type = .LONG,
+                    entry_price = c.close,
+                    size = kd.lot_size,
+                    sl = c.close - risk_points,
+                    tp = c.close + (risk_points * 2.0), // 1:2 Risk/Reward
+                    pnl = 0.0,
+                }
+                fmt.printf("[EXECUTION] ⚔️ ENTERED LONG at %f | SL: %f | TP: %f\n", c.close, broker.position.sl, broker.position.tp)
+            } else if kd.state_code == -2 && math.abs(c.close - vah) <= tick_size * 2.0 {
+                // CONFLUENCE: Bearish Flow (State -2) + Whale Absorption at VAH
+                broker.position = Position{
+                    type = .SHORT,
+                    entry_price = c.close,
+                    size = kd.lot_size,
+                    sl = c.close + risk_points,
+                    tp = c.close - (risk_points * 2.0), // 1:2 Risk/Reward
+                    pnl = 0.0,
+                }
+                fmt.printf("[EXECUTION] ⚔️ ENTERED SHORT at %f | SL: %f | TP: %f\n", c.close, broker.position.sl, broker.position.tp)
+            }
+        }
+
+        broadcast_candle(c, metrics, status, poc_price, vah, val, live_alma20_high, live_alma20_low, live_alma200_high, live_alma200_low, &active_zones, whale_signal, broker)
         // 1. Slow it down significantly. 
         // 100ms = 10 ticks per second (Good for "watching" the strategy)
         // 500ms = 2 ticks per second (Very calm, easy to debug)
@@ -445,7 +526,7 @@ calculate_viking_metrics :: proc(c: Candle, drawdown: f64, state: ^EngineState) 
     return kd
 }
 
-broadcast_candle :: proc(c: Candle, kd: KineticData, status: string, poc_price: f64, vah: f64, val: f64, alma20_high: f64, alma20_low: f64, alma200_high: f64, alma200_low: f64, active_zones: ^[dynamic]MitigationZone, whale_signal: string) {
+broadcast_candle :: proc(c: Candle, kd: KineticData, status: string, poc_price: f64, vah: f64, val: f64, alma20_high: f64, alma20_low: f64, alma200_high: f64, alma200_low: f64, active_zones: ^[dynamic]MitigationZone, whale_signal: string, broker: Broker) {
     
     // 1. Pack the active zones into a string
     b: strings.Builder
@@ -466,14 +547,19 @@ broadcast_candle :: proc(c: Candle, kd: KineticData, status: string, poc_price: 
         ghost_str = "none"
     }
 
-    // 2. The perfectly widened 19-variable print statement
-    // Ensure there are 18 commas (19 values total)
-    fmt.printf("candle:%v,%f,%f,%f,%f,%f,%f,%s,%d,%f,%f,%f,%f,%f,%f,%f,%f,%f,%s,%s\n", 
+    // --- NEW: Map the Position Enum to an Integer ---
+    pos_code := 0
+    if broker.position.type == .LONG do pos_code = 1
+    if broker.position.type == .SHORT do pos_code = -1
+
+    // 2. The perfectly widened 23-variable print statement
+    fmt.printf("candle:%v,%f,%f,%f,%f,%f,%f,%s,%d,%f,%f,%f,%f,%f,%f,%f,%f,%f,%s,%s,%d,%f,%f\n", 
         c.time, c.open, c.high, c.low, c.close, c.volume, c.indicator, 
         status, kd.state_code, kd.lot_size, kd.probability, poc_price, 
         vah, val, 
-        alma20_high, alma20_low, alma200_high, alma200_low, // The 4 ALMA channels
+        alma20_high, alma20_low, alma200_high, alma200_low, 
         ghost_str,
         whale_signal,
+        pos_code, broker.position.pnl, broker.balance // <-- Using 'pos_code' instead of the struct!
     )
 }

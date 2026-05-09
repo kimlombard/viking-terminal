@@ -72,7 +72,7 @@ defmodule TradingLab.EnginePort do
     # Expanded Odin Output: time, open, high, low, close, volume, bsp, status, state, lot, prob, poc, vah, val, alma20_high, alma20_low, alma200_high, alma200_low, ghosts
     case String.split(String.trim(line), ",") do
       # This must match the Odin printf EXACTLY column for column
-      [t, o, h, l, c, v, ind, stat, sc, lot, prob, poc, vah, val, alma20_high, alma20_low, alma200_high, alma200_low, ghosts, whale] ->
+      [t, o, h, l, c, v, ind, stat, sc, lot, prob, poc, vah, val, alma20_high, alma20_low, alma200_high, alma200_low, ghosts, whale, pos, pnl, bal] ->
         {:ok, %{
           time: String.to_integer(t),
           open: to_f(o),
@@ -93,7 +93,12 @@ defmodule TradingLab.EnginePort do
           alma200_high: to_f(alma200_high),
           alma200_low: to_f(alma200_low),
           ghosts: parse_ghosts(String.trim(ghosts)),
-          whale_alert: String.trim(whale)
+          whale_alert: String.trim(whale),
+
+          # --- NEW BROKER DATA ---
+          position: String.to_integer(String.trim(pos)),
+          pnl: to_f(pnl),
+          balance: to_f(bal)
         }}
       _ ->
         :error

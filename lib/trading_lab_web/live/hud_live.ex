@@ -19,7 +19,12 @@ defmodule TradingLabWeb.HudLive do
       lot_size: 1.0,
       prob: 50.0,
       status: "OK",
-      signals: historical_signals
+      signals: historical_signals,
+
+      # --- NEW: INITIAL BROKER DEFAULTS ---
+      balance: 100000.0,
+      pnl: 0.0,
+      position: 0
     )
 
     {:ok, socket, layout: {TradingLabWeb.Layouts, :terminal}}
@@ -48,7 +53,12 @@ defmodule TradingLabWeb.HudLive do
       alma200_high: data.alma200_high,
       alma200_low: data.alma200_low,
       ghosts: data.ghosts,
-      whale_alert: data.whale_alert
+      whale_alert: data.whale_alert,
+
+      # --- NEW BROKER DATA ---
+      position: data.position,
+      pnl: data.pnl,
+      balance: data.balance
     })
 
     # --- GET CURRENT MEMORY ---
@@ -87,7 +97,12 @@ defmodule TradingLabWeb.HudLive do
       lot_size: data.lot_size,
       prob: data.probability,
       status: data.status,
-      signals: updated_signals # <--- Shoving the updated list back into state
+      signals: updated_signals, # <--- Shoving the updated list back into state
+
+      # --- NEW BROKER DATA ---
+      position: data.position,
+      pnl: data.pnl,
+      balance: data.balance
     )
 
     {:noreply, socket}
