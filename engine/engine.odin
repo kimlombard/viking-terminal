@@ -23,15 +23,30 @@ Candle :: struct {
 KineticData :: struct {
     state_code: int,
     probability: f64,
+    hmm_signal: f64,
+    bb_upper: f64,
+    bb_lower: f64,
+    joat_top: f64,
+    joat_bot: f64,
+    joat_dir: int,
+    div_type: int, // NEW: 0=None, 1=RegBull, 2=RegBear, 3=HidBull, 4=HidBear
+    div_time: i64, // NEW: The timestamp of the pivot
+    cross_sig: int, // <-- NEW: 0=None, 1=CrossUp, -1=CrossDown
     lot_size: f64,
 }
 
 EngineState :: struct {
     prev_close: f64,
     prev_atr:   f64,
+    prev_osc:   f64, // <-- NEW: Remember previous Net Regime
+    prev_sig:   f64, // <-- NEW: Remember previous Signal Line
     is_seeded:  bool,
     prev_state_idx: int,          
-    transitions:    [4][4]int,    
+    transitions:    [4][4]int,
+    hmm_sens:  f64, // From your v4 settings: 1.5
+    base_bull: f64, // 0.70
+    base_bear: f64, // 0.70
+    base_chop: f64, // 0.50
 }
 
 // --- ALMA ENGINE (Arnaud Legoux Moving Average) ---
@@ -70,6 +85,12 @@ Position :: struct {
 Broker :: struct {
     balance:  f64,
     position: Position,
+}
+
+EfficiencyRatio :: struct {
+    period: int,
+    history: [dynamic]f64,
+    last_er: f64,
 }
 
 // Boot up the ALMA and pre-calculate the heavy Gaussian math
@@ -113,16 +134,24 @@ update_alma :: proc(state: ^AlmaState, price: f64) -> f64 {
     return alma / state.weight_sum
 }
 
-// --- NEW: Initialize the Broker ---
+main :: proc() {
+    kd: KineticData
+
+    // --- NEW: A Bulletproof Time Incrementor ---
+    // Start at an arbitrary recent Unix timestamp (e.g., May 2024)
+    current_sim_time: i64 = 1714521600
+
+    er_engine := EfficiencyRatio{
+        period = 20,
+        history = make([dynamic]f64, 0, 21),
+        last_er = 0.0,}
+
+    // --- NEW: Initialize the Broker ---
     broker := Broker{ 
         balance = 100000.0, // $100k Starting Capital
         position = Position{type = .NONE} 
     }
 
-    // --- 4. THE HISTORICAL PROCESSING LOOP ---
-
-main :: proc() {
-    kd: KineticData
     // --- 1. BOOT THE LUA BRAIN ---
     L := lua.L_newstate()
     if L == nil {
@@ -172,7 +201,7 @@ main :: proc() {
     }
 
     // --- 3. LOAD THE HISTORICAL FILE ---
-    filepath := "/home/kim/dev/trading_lab/engine/data/NAS100_1min.csv"
+    filepath := "/home/kim/dev/trading_lab/engine/data/NAS100_5min.csv"
     // Pass context.allocator as the second argument
     data, err := os.read_entire_file_from_path(filepath, context.allocator)
     if err != 0 {
@@ -181,10 +210,17 @@ main :: proc() {
     }
     defer delete(data)
 
+    // Initialize the volume profile map (Price -> Volume)
     lines := strings.split_lines(string(data))
     tick_index : c.int = 0
     initial_balance := 26820.0
-    state := EngineState{ is_seeded = false }
+    state := EngineState{ 
+        is_seeded = false,
+        hmm_sens  = 1.5,
+        base_bull = 0.70,
+        base_bear = 0.70,
+        base_chop = 0.50,
+    }
 
     // Initialize the volume profile map (Price -> Volume)
     volume_profile := make(map[f64]f64)
@@ -198,24 +234,55 @@ main :: proc() {
     // --- NEW: The Ghost Level Tracker ---
     active_zones := make([dynamic]MitigationZone)
 
+    // NEW: The Divergence Engine (10 period lookback)
+    swing_engine := init_swing_tracker(10)
+
+    // ==========================================
+    // --- NEW: THE QUANTUM MATRIX INIT ---
+    // ==========================================
+    matrix_state := init_matrix_state()
+    adapt_sig_engine := init_adaptive_signal(2, 30)
+    nr_window := init_rolling_window(20)    // NEW: The Bollinger Band Window (20-period)
+    joat_engine := init_joat_pulse(5, 55, 15.0)        // NEW: The JOAT Pulse Engine
+    
+    // Momentum Trackers (20 period lookback)
+    mom_ema    := init_ema(20)
+    mom_window := init_rolling_window(20)
+    
+    // Volatility Trackers (20 period lookback)
+    vol_ema    := init_ema(20)
+    vol_window := init_rolling_window(20)
+
     // --- 4. THE HISTORICAL PROCESSING LOOP ---
     for i := 3; i < len(lines); i += 1 {
         line := lines[i]
         if len(line) == 0 do continue
 
         columns := strings.split(line, ",")
-        if len(columns) < 6 do continue
+        if len(columns) < 5 do continue // Only require 5 columns for OHLCV!
 
         c: Candle
-        // Use real unix seconds to keep the browser chart happy
-        c.time = time.to_unix_nanoseconds(time.now()) / 1_000_000_000
         
-        // FIX: Handling the error return from parse_f64
-        c.close, _ = strconv.parse_f64(columns[1])
-        c.high, _  = strconv.parse_f64(columns[2])
-        c.low, _   = strconv.parse_f64(columns[3])
-        c.open, _  = strconv.parse_f64(columns[4])
-        c.volume, _ = strconv.parse_f64(columns[5])
+        // 1. THE TIME FIX: Force perfectly spaced 5-minute timestamps
+        c.time = current_sim_time
+        current_sim_time += 300 // Add 300 seconds (5 minutes) for the next candle!
+        
+        // 2. THE PARSER FIX: Trim hidden \r and \n characters from the CSV strings
+        c.close, _ = strconv.parse_f64(columns[0])
+        c.high, _  = strconv.parse_f64(columns[1])
+        c.low, _ = strconv.parse_f64(columns[2])
+        c.open, _ = strconv.parse_f64(columns[3])
+        c.volume, _ = strconv.parse_f64(columns[4])
+
+        // 3. THE BSP FIX: Only read BSP if it actually exists in the CSV!
+        if len(columns) > 6 {
+            c.indicator, _ = strconv.parse_f64(strings.trim_space(columns[6]))
+        } else {
+            c.indicator = 0.0 // No BSP in yfinance data
+        }
+
+        // Pass the close price to the Matrix Engine
+        current_er := update_er(&er_engine, c.close)
 
         // The "Resolution" of your profile. 
         // Use 1.0 for NAS100 (whole numbers), or maybe 0.5 for XAUUSD.
@@ -297,7 +364,91 @@ main :: proc() {
         status := drawdown > 0.05 ? "VIOLATION" : "OK"
 
         tick_index += 1
-        metrics := calculate_viking_metrics(c, drawdown, &state) 
+        metrics := calculate_viking_metrics(c, drawdown, &state)
+        
+        // ==========================================
+        // --- THE QUANTUM MATRIX PIPELINE ---
+        // ==========================================
+        // 1. Raw Momentum (ROC Percentage) & Volatility (True Range)
+        mom_raw: f64 = 0.0
+        if state.prev_close != 0.0 {
+            mom_raw = ((c.close - state.prev_close) / state.prev_close) * 100.0 // True ROC
+        }
+        
+        tr := math.max(c.high - c.low, math.max(math.abs(c.high - state.prev_close), math.abs(c.low - state.prev_close)))
+        if !state.is_seeded do tr = c.high - c.low
+
+        // 2. Smooth Momentum & Standardize (Z-Score)
+        mom_smooth := update_ema(&mom_ema, mom_raw)
+        update_window(&mom_window, mom_smooth)
+        mom_sma := get_sma(&mom_window)
+        mom_std := get_stdev(&mom_window, mom_sma)
+        
+        obs_mom := mom_std != 0.0 ? (mom_smooth - mom_sma) / mom_std : 0.0
+
+        // 3. Smooth Volatility (ATR) & Standardize (Z-Score)
+        atr := update_ema(&vol_ema, tr) // <-- NOW WE HAVE SMOOTHED ATR!
+        
+        update_window(&vol_window, atr)
+        vol_sma := get_sma(&vol_window)
+        vol_std := get_stdev(&vol_window, vol_sma)
+        
+        obs_vol := vol_std != 0.0 ? (atr - vol_sma) / vol_std : 0.0
+
+        // 4. FIRE THE BAYESIAN MATRIX!
+        net_regime := update_matrix(&matrix_state, &state, current_er, obs_mom, obs_vol)
+
+        // 5. CALCULATE THE ELASTIC SIGNAL LINE
+        adapt_sig := update_adaptive_signal(&adapt_sig_engine, net_regime, current_er)
+
+        // 6. CALCULATE BOLLINGER BANDS
+        update_window(&nr_window, net_regime)
+        // Since we want the BBs centered on the Adaptive Signal, we pass adapt_sig instead of SMA!
+        nr_std := get_stdev(&nr_window, adapt_sig) 
+        
+        bb_upper := adapt_sig + (nr_std * 2.0)
+        bb_lower := adapt_sig - (nr_std * 2.0)
+
+        // 7. CALCULATE JOAT PULSE
+        joat_top, joat_bot, joat_dir := update_joat_pulse(&joat_engine, c.close, net_regime)
+
+        // 8. CALCULATE DIVERGENCE
+        reg_bull, reg_bear, hid_bull, hid_bear, pivot_time := update_swing_tracker(&swing_engine, c.time, c.close, net_regime)
+        
+        div_code := 0
+        if reg_bull do div_code = 1
+        if reg_bear do div_code = 2
+        if hid_bull do div_code = 3
+        if hid_bear do div_code = 4
+
+        // --- 9. QUANTUM CROSSOVER DETECTOR ---
+        cross_sig := 0
+        if state.is_seeded {
+            // Cross Up (Long Signal): Osc was below Sig, now is above AND happens below Zero line
+            if state.prev_osc < state.prev_sig && net_regime > adapt_sig && net_regime < 0.0 {
+                cross_sig = 1
+            }
+            // Cross Down (Short Signal): Osc was above Sig, now is below AND happens above Zero line
+            if state.prev_osc > state.prev_sig && net_regime < adapt_sig && net_regime > 0.0 {
+                cross_sig = -1
+            }
+        }
+
+        // Save for next tick
+        state.prev_osc = net_regime
+        state.prev_sig = adapt_sig
+        
+        // 10. Hijack the old markov probability to send Net Regime to the UI!
+        metrics.probability = net_regime
+        metrics.hmm_signal = adapt_sig
+        metrics.bb_upper    = bb_upper 
+        metrics.bb_lower    = bb_lower 
+        metrics.joat_top    = joat_top 
+        metrics.joat_bot    = joat_bot 
+        metrics.joat_dir    = joat_dir 
+        metrics.div_type    = div_code 
+        metrics.div_time    = pivot_time 
+        metrics.cross_sig   = cross_sig
 
         // --- Calculate Live ALMA ---
         live_alma20_high := update_alma(&alma20_high_state, c.high)
@@ -438,7 +589,7 @@ main :: proc() {
         // 1. Slow it down significantly. 
         // 100ms = 10 ticks per second (Good for "watching" the strategy)
         // 500ms = 2 ticks per second (Very calm, easy to debug)
-        time.sleep(200 * time.Millisecond) 
+        time.sleep(100 * time.Millisecond) 
 
         // 2. CRITICAL: Explicitly flush after every single tick
         // This prevents the OS from "batching" 100 ticks and sending them all at once
@@ -552,14 +703,14 @@ broadcast_candle :: proc(c: Candle, kd: KineticData, status: string, poc_price: 
     if broker.position.type == .LONG do pos_code = 1
     if broker.position.type == .SHORT do pos_code = -1
 
-    // 2. The perfectly widened 23-variable print statement
-    fmt.printf("candle:%v,%f,%f,%f,%f,%f,%f,%s,%d,%f,%f,%f,%f,%f,%f,%f,%f,%f,%s,%s,%d,%f,%f\n", 
+    // 2. The PERFECT 32-variable print statement
+    fmt.printf("candle:%v,%f,%f,%f,%f,%f,%f,%s,%d,%f,%f,%f,%f,%f,%f,%f,%d,%d,%v,%d,%f,%f,%f,%f,%f,%f,%f,%s,%s,%d,%f,%f\n", 
         c.time, c.open, c.high, c.low, c.close, c.volume, c.indicator, 
-        status, kd.state_code, kd.lot_size, kd.probability, poc_price, 
+        status, kd.state_code, kd.lot_size, kd.probability, kd.hmm_signal, kd.bb_upper, kd.bb_lower, kd.joat_top, kd.joat_bot, kd.joat_dir, kd.div_type, kd.div_time, kd.cross_sig, poc_price, 
         vah, val, 
         alma20_high, alma20_low, alma200_high, alma200_low, 
         ghost_str,
         whale_signal,
-        pos_code, broker.position.pnl, broker.balance // <-- Using 'pos_code' instead of the struct!
+        pos_code, broker.position.pnl, broker.balance
     )
 }

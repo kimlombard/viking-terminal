@@ -72,7 +72,7 @@ defmodule TradingLab.EnginePort do
     # Expanded Odin Output: time, open, high, low, close, volume, bsp, status, state, lot, prob, poc, vah, val, alma20_high, alma20_low, alma200_high, alma200_low, ghosts
     case String.split(String.trim(line), ",") do
       # This must match the Odin printf EXACTLY column for column
-      [t, o, h, l, c, v, ind, stat, sc, lot, prob, poc, vah, val, alma20_high, alma20_low, alma200_high, alma200_low, ghosts, whale, pos, pnl, bal] ->
+      [t, o, h, l, c, v, ind, stat, sc, lot, prob, hmm_sig, bbu, bbl, jtop, jbot, jdir, div_code, div_time, cross, poc, vah, val, alma20_high, alma20_low, alma200_high, alma200_low, ghosts, whale, pos, pnl, bal] ->
         {:ok, %{
           time: String.to_integer(t),
           open: to_f(o),
@@ -85,6 +85,15 @@ defmodule TradingLab.EnginePort do
           state: String.to_integer(String.trim(sc)),
           lot_size: to_f(lot),
           probability: to_f(prob),
+          hmm_signal: to_f(hmm_sig),
+          bb_upper: to_f(bbu),
+          bb_lower: to_f(bbl),
+          joat_top: to_f(jtop),
+          joat_bot: to_f(jbot),
+          joat_dir: String.to_integer(String.trim(jdir)),
+          div_code: String.to_integer(String.trim(div_code)),
+          div_time: String.to_integer(String.trim(div_time)),
+          cross_sig: String.to_integer(String.trim(cross)),
           poc_price: to_f(poc),
           vah: to_f(vah),
           val: to_f(val),
@@ -94,7 +103,6 @@ defmodule TradingLab.EnginePort do
           alma200_low: to_f(alma200_low),
           ghosts: parse_ghosts(String.trim(ghosts)),
           whale_alert: String.trim(whale),
-
           # --- NEW BROKER DATA ---
           position: String.to_integer(String.trim(pos)),
           pnl: to_f(pnl),

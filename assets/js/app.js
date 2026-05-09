@@ -93,7 +93,8 @@ Hooks.TradingTerminal = {
       if (!isDragging) return;
 
       const deltaY = e.clientY - startY;
-      const totalHeight = container.getBoundingClientRect().height;
+      // FIX: Subtract the 3px of resizer handles from the total available height!
+      const totalHeight = container.getBoundingClientRect().height - 3;
 
       if (currentResizer === 1) {
         // Dragging the first resizer (between Main and Sub 1)
@@ -212,9 +213,41 @@ Hooks.TradingTerminal = {
       lineStyle: 2 
     });
 
-    // 3. Sub-Pane 2: HMM Probability (Histogram)
+    // 3. Sub-Pane 2: HMM Probability (Oscillator)
     this.subChart2 = createChart(sub2El, { ...chartOptions, height: 150, timeScale: { ...chartOptions.timeScale, visible: false } });
-    this.hmmSeries = this.subChart2.addHistogramSeries({ color: '#eab308' });
+
+    // --- 1. THE BACKGROUND MASK (Draws First) ---
+    this.joatTopSeries = this.subChart2.addAreaSeries({
+        lineColor: 'rgba(6, 182, 212, 0.6)',
+        topColor: 'rgba(6, 182, 212, 0.15)',
+        bottomColor: 'rgba(6, 182, 212, 0.15)',
+        baseValue: { type: 'price', price: -500 }, // Anchor safely off-screen
+        crosshairMarkerVisible: false,
+    });
+    this.joatBotSeries = this.subChart2.addAreaSeries({
+        lineColor: 'rgba(6, 182, 212, 0.6)',
+        topColor: '#111827', // Match your exact chart background color!
+        bottomColor: '#111827',
+        baseValue: { type: 'price', price: -500 },
+        crosshairMarkerVisible: false,
+    });
+
+    // --- 2. THE ZERO LINE (Since the mask hides the native grid) ---
+    this.zeroLineSeries = this.subChart2.addLineSeries({
+        color: 'rgba(255, 255, 255, 0.1)',
+        lineWidth: 1,
+        lineStyle: 2, // Dashed
+        crosshairMarkerVisible: false,
+    });
+
+    // --- 3. THE FOREGROUND (Draws on top of the mask) ---
+    this.hmmSeries = this.subChart2.addLineSeries({ lineWidth: 3 });
+    this.hmmMarkers = []; 
+
+    this.hmmSignalSeries = this.subChart2.addLineSeries({ color: 'rgba(255, 255, 255, 0.8)', lineWidth: 2 });
+
+    this.bbUpperSeries = this.subChart2.addLineSeries({ color: 'rgba(59, 130, 246, 0.4)', lineWidth: 1, lineStyle: 2 });
+    this.bbLowerSeries = this.subChart2.addLineSeries({ color: 'rgba(59, 130, 246, 0.4)', lineWidth: 1, lineStyle: 2 });
 
     // 4. Unified Synchronization
     const syncGroup = [
@@ -372,10 +405,100 @@ Hooks.TradingTerminal = {
       });
       
       if (payload.bsp) this.bspSeries.update({ time: payload.time, value: payload.bsp });
-      // NEW: Update the Signal Line
       if (payload.bsp_ema) this.bspEmaSeries.update({ time: payload.time, value: payload.bsp_ema });
-      if (payload.probability) this.hmmSeries.update({ time: payload.time, value: payload.probability, color: stateStyle.candle });
-    });
+      
+      // --- Sub-Pane 2: QUANTUM MATRIX & JOAT PULSE ---
+      if (payload.probability !== undefined) {
+        // 1. Dynamic Strength Gradient for the HMM Line
+        let oscColor = '#6b7280'; // Default Chop
+        if (payload.probability > 15) oscColor = '#06b6d4'; // Bull
+        if (payload.probability > 40) oscColor = '#3b82f6'; // Strong Bull
+        if (payload.probability < -15) oscColor = '#d946ef'; // Bear
+        if (payload.probability < -40) oscColor = '#ef4444'; // Strong Bear
+
+        this.hmmSeries.update({ time: payload.time, value: payload.probability, color: oscColor });
+        this.zeroLineSeries.update({ time: payload.time, value: 0.0 });
+      }
+
+      // 2. The Native Masking Fill with SEGMENT-LEVEL Gradient Colors!
+      if (payload.joat_top !== undefined && payload.joat_bot !== undefined) {
+        let edgeColor = payload.joat_dir === 1 ? 'rgba(6, 182, 212, 0.6)' : 'rgba(217, 70, 239, 0.6)';
+        
+        // Calculate dynamic strength opacity! (0.0 to 0.35 based on HMM Probability)
+        let fillOpacity = Math.min(0.35, Math.abs(payload.probability || 0) / 100);
+        let fillColor = payload.joat_dir === 1 ? `rgba(6, 182, 212, ${fillOpacity})` : `rgba(217, 70, 239, ${fillOpacity})`;
+
+        // Pass colors directly into the update payload so it changes per-candle!
+        this.joatTopSeries.update({ 
+            time: payload.time, 
+            value: payload.joat_top,
+            lineColor: edgeColor,
+            topColor: fillColor,
+            bottomColor: fillColor
+        });
+        
+        // The bottom mask keeps its background color, but updates the line edge!
+        this.joatBotSeries.update({ 
+            time: payload.time, 
+            value: payload.joat_bot,
+            lineColor: edgeColor
+        });
+      }
+
+      // Update the Boundaries
+      if (payload.hmm_signal !== undefined) this.hmmSignalSeries.update({ time: payload.time, value: payload.hmm_signal });
+      if (payload.bb_upper !== undefined) this.bbUpperSeries.update({ time: payload.time, value: payload.bb_upper });
+      if (payload.bb_lower !== undefined) this.bbLowerSeries.update({ time: payload.time, value: payload.bb_lower });
+
+      // --- 3. THE SIGNAL ENGINE (Crossovers & Divergence) ---
+      let newMarkersAdded = false;
+
+      // Crossover Markers (Arrows)
+      if (payload.cross_sig !== undefined && payload.cross_sig !== 0) {
+          let cColor = payload.cross_sig === 1 ? '#22c55e' : '#ef4444';
+          let cShape = payload.cross_sig === 1 ? 'arrowUp' : 'arrowDown';
+          let cPos = payload.cross_sig === 1 ? 'belowBar' : 'aboveBar';
+
+          this.hmmMarkers.push({
+            time: payload.time,
+            position: cPos, 
+            color: cColor,
+            shape: cShape,
+            text: '' 
+          });
+          newMarkersAdded = true;
+      }
+
+      // Divergence Markers (Dots) - RESTORED!
+      if (payload.div_code !== undefined && payload.div_code > 0 && payload.div_time > 0) {
+        let mColor = '';
+        let mText = '';
+        
+        if (payload.div_code === 1) { mColor = '#22c55e'; mText = 'R-BULL'; } 
+        if (payload.div_code === 2) { mColor = '#ef4444'; mText = 'R-BEAR'; } 
+        if (payload.div_code === 3) { mColor = '#06b6d4'; mText = 'H-BULL'; } 
+        if (payload.div_code === 4) { mColor = '#f97316'; mText = 'H-BEAR'; } 
+        
+        this.hmmMarkers.push({
+          time: payload.div_time, // Plots retroactively on the exact pivot time!
+          position: payload.div_code % 2 === 1 ? 'belowBar' : 'aboveBar',
+          color: mColor,
+          shape: 'circle',
+          text: mText
+        });
+        newMarkersAdded = true;
+      }
+
+      // Apply markers to chart safely
+      if (newMarkersAdded) {
+          // Remove potential duplicates to prevent Lightweight Charts from crashing
+          this.hmmMarkers = this.hmmMarkers.filter((v, i, a) => a.findIndex(v2 => (v2.time === v.time && v2.text === v.text && v2.shape === v.shape)) === i);
+          // Sort strictly by time
+          this.hmmMarkers.sort((a, b) => a.time - b.time);
+          this.hmmSeries.setMarkers(this.hmmMarkers);
+      }
+
+    }); // <-- End of handleEvent
 
     // 6. Resize Observer (Using dataset checks)
     this.resizeObserver = new ResizeObserver(entries => {
